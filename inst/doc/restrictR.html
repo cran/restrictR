@@ -12,7 +12,7 @@
 
 <meta name="author" content="Gilles Colling" />
 
-<meta name="date" content="2026-03-04" />
+<meta name="date" content="2026-10-05" />
 
 <title>Runtime Contracts for R Functions</title>
 
@@ -341,7 +341,7 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 <h1 class="title toc-ignore">Runtime Contracts for R Functions</h1>
 <h4 class="author">Gilles Colling</h4>
-<h4 class="date">2026-03-04</h4>
+<h4 class="date">2026-10-05</h4>
 
 
 
@@ -350,8 +350,10 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 <h2>Overview</h2>
 <p><code>restrictR</code> lets you define reusable input contracts from
 small building blocks using the base pipe <code>|&gt;</code>. A contract
-is defined once and called like a function to validate data at
-runtime.</p>
+is defined once and called like a function to validate data at runtime.
+Validators are immutable: each <code>|&gt;</code> returns a new
+validator, so you can safely branch from a shared base without side
+effects.</p>
 <table>
 <colgroup>
 <col width="32%" />
@@ -377,15 +379,29 @@ runtime.</p>
 <td>Restrict string arguments to a fixed set</td>
 </tr>
 <tr class="even">
+<td><a href="#arbitrary-classes">Arbitrary classes</a></td>
+<td>Validate factors, dates, and model objects</td>
+</tr>
+<tr class="odd">
+<td><a href="#data-frame-with-mixed-constraints">Data frame with mixed
+constraints</a></td>
+<td>Columns + enums + ranges in one contract</td>
+</tr>
+<tr class="even">
+<td><a href="#checking-without-stopping">Checking without
+stopping</a></td>
+<td>Collect all failures; test without throwing</td>
+</tr>
+<tr class="odd">
 <td><a href="#custom-steps">Custom steps</a></td>
 <td>Domain-specific invariants</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><a href="#self-documentation">Self-documentation</a></td>
 <td>Print, <code>as_contract_text()</code>,
 <code>as_contract_block()</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><a href="#using-contracts-in-packages">Using contracts in
 packages</a></td>
 <td>The recommended pattern for R packages</td>
@@ -399,12 +415,15 @@ packages</a></td>
 in a predict-like function. Instead of scattering
 <code>if</code>/<code>stop()</code> blocks, define the contract
 once:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>require_newdata <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;newdata&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>  <span class="fu">require_df</span>() <span class="sc">|&gt;</span></span>
-<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>  <span class="fu">require_has_cols</span>(<span class="fu">c</span>(<span class="st">&quot;x1&quot;</span>, <span class="st">&quot;x2&quot;</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  <span class="fu">require_col_numeric</span>(<span class="st">&quot;x1&quot;</span>, <span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>  <span class="fu">require_col_numeric</span>(<span class="st">&quot;x2&quot;</span>, <span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>  <span class="fu">require_nrow_min</span>(<span class="dv">1</span><span class="dt">L</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>require_feature <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;feature&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>require_newdata <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;newdata&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>  <span class="fu">require_df</span>() <span class="sc">|&gt;</span></span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>  <span class="fu">require_has_cols</span>(<span class="fu">c</span>(<span class="st">&quot;x1&quot;</span>, <span class="st">&quot;x2&quot;</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;x1&quot;</span>, require_feature) <span class="sc">|&gt;</span></span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;x2&quot;</span>, require_feature) <span class="sc">|&gt;</span></span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>  <span class="fu">require_nrow_min</span>(<span class="dv">1</span><span class="dt">L</span>)</span></code></pre></div>
 <p>The result is a callable function. Valid input passes silently:</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>good <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">x1 =</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>), <span class="at">x2 =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">5</span>, <span class="dv">6</span>))</span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="fu">require_newdata</span>(good)</span></code></pre></div>
@@ -457,145 +476,332 @@ same length as the rows in <code>newdata</code>:</p>
 <div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a><span class="fu">require_method</span>(<span class="st">&quot;euclidean&quot;</span>)</span></code></pre></div>
 <div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a><span class="fu">require_method</span>(<span class="st">&quot;chebyshev&quot;</span>)</span>
 <span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
-<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="co">#&gt; ! method: must be one of [&quot;euclidean&quot;, &quot;manhattan&quot;, &quot;cosine&quot;]</span></span>
-<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a><span class="co">#&gt;   Found: &quot;chebyshev&quot;</span></span>
-<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a><span class="co">#&gt;   At: 1</span></span></code></pre></div>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="co">#&gt; ! method: must be one of: &quot;euclidean&quot;, &quot;manhattan&quot;, &quot;cosine&quot;</span></span>
+<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a><span class="co">#&gt;   Found: &quot;chebyshev&quot;</span></span></code></pre></div>
+</div>
+<div id="arbitrary-classes" class="section level2">
+<h2>Arbitrary Classes</h2>
+<p><code>require_class()</code> covers types without a dedicated check,
+such as factors, dates, and fitted-model objects. By default it tests
+inheritance, so a subclass passes; set <code>exact = TRUE</code> to
+require the first class exactly.</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>require_event <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;event&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>  <span class="fu">require_class</span>(<span class="st">&quot;Date&quot;</span>)</span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a></span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a><span class="fu">require_event</span>(<span class="fu">as.Date</span>(<span class="st">&quot;2026-01-01&quot;</span>))</span></code></pre></div>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a><span class="fu">require_event</span>(<span class="st">&quot;2026-01-01&quot;</span>)</span>
+<span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a><span class="co">#&gt; ! event: must be of class &quot;Date&quot;, got character</span></span></code></pre></div>
+</div>
+<div id="data-frame-with-mixed-constraints" class="section level2">
+<h2>Data Frame with Mixed Constraints</h2>
+<p>Contracts work well for functions that accept a data frame with typed
+columns, value ranges, and categorical fields in one go:</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a>require_survey <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;survey&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>  <span class="fu">require_df</span>() <span class="sc">|&gt;</span></span>
+<span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a>  <span class="fu">require_has_cols</span>(<span class="fu">c</span>(<span class="st">&quot;age&quot;</span>, <span class="st">&quot;income&quot;</span>, <span class="st">&quot;status&quot;</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb17-4"><a href="#cb17-4" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;age&quot;</span>, <span class="fu">restrict</span>(<span class="st">&quot;age&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb17-5"><a href="#cb17-5" tabindex="-1"></a>                <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb17-6"><a href="#cb17-6" tabindex="-1"></a>                <span class="fu">require_between</span>(<span class="at">lower =</span> <span class="dv">0</span>, <span class="at">upper =</span> <span class="dv">150</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb17-7"><a href="#cb17-7" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;income&quot;</span>, <span class="fu">restrict</span>(<span class="st">&quot;income&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb17-8"><a href="#cb17-8" tabindex="-1"></a>                <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb17-9"><a href="#cb17-9" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;status&quot;</span>, <span class="fu">restrict</span>(<span class="st">&quot;status&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb17-10"><a href="#cb17-10" tabindex="-1"></a>                <span class="fu">require_one_of</span>(<span class="fu">c</span>(<span class="st">&quot;active&quot;</span>, <span class="st">&quot;inactive&quot;</span>, <span class="st">&quot;pending&quot;</span>)))</span></code></pre></div>
+<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>good_survey <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>  <span class="at">age =</span> <span class="fu">c</span>(<span class="dv">25</span>, <span class="dv">40</span>, <span class="dv">33</span>),</span>
+<span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>  <span class="at">income =</span> <span class="fu">c</span>(<span class="dv">35000</span>, <span class="dv">60000</span>, <span class="dv">45000</span>),</span>
+<span id="cb18-4"><a href="#cb18-4" tabindex="-1"></a>  <span class="at">status =</span> <span class="fu">c</span>(<span class="st">&quot;active&quot;</span>, <span class="st">&quot;inactive&quot;</span>, <span class="st">&quot;active&quot;</span>)</span>
+<span id="cb18-5"><a href="#cb18-5" tabindex="-1"></a>)</span>
+<span id="cb18-6"><a href="#cb18-6" tabindex="-1"></a><span class="fu">require_survey</span>(good_survey)</span></code></pre></div>
+<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>bad_survey <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a>  <span class="at">age =</span> <span class="fu">c</span>(<span class="dv">25</span>, <span class="sc">-</span><span class="dv">5</span>, <span class="dv">200</span>),</span>
+<span id="cb19-3"><a href="#cb19-3" tabindex="-1"></a>  <span class="at">income =</span> <span class="fu">c</span>(<span class="dv">35000</span>, <span class="dv">60000</span>, <span class="dv">45000</span>),</span>
+<span id="cb19-4"><a href="#cb19-4" tabindex="-1"></a>  <span class="at">status =</span> <span class="fu">c</span>(<span class="st">&quot;active&quot;</span>, <span class="st">&quot;inactive&quot;</span>, <span class="st">&quot;active&quot;</span>)</span>
+<span id="cb19-5"><a href="#cb19-5" tabindex="-1"></a>)</span>
+<span id="cb19-6"><a href="#cb19-6" tabindex="-1"></a><span class="fu">require_survey</span>(bad_survey)</span>
+<span id="cb19-7"><a href="#cb19-7" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb19-8"><a href="#cb19-8" tabindex="-1"></a><span class="co">#&gt; ! survey$age: must be in [0, 150]</span></span>
+<span id="cb19-9"><a href="#cb19-9" tabindex="-1"></a><span class="co">#&gt;   Found: -5</span></span>
+<span id="cb19-10"><a href="#cb19-10" tabindex="-1"></a><span class="co">#&gt;   At: 2, 3</span></span></code></pre></div>
+</div>
+<div id="composing-validators" class="section level2">
+<h2>Composing Validators</h2>
+<p><code>require_col()</code> lifts any validator onto a data frame
+column, so a rule written once serves both a standalone argument and a
+column. Errors keep the column path. <code>require_each()</code> applies
+a validator to every element of a list, and
+<code>require_fields()</code> to named fields:</p>
+<div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>require_age <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;age&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a>  <span class="fu">require_integer</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a>  <span class="fu">require_between</span>(<span class="dv">0</span>, <span class="dv">120</span>)</span>
+<span id="cb20-4"><a href="#cb20-4" tabindex="-1"></a></span>
+<span id="cb20-5"><a href="#cb20-5" tabindex="-1"></a>require_people <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;people&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-6"><a href="#cb20-6" tabindex="-1"></a>  <span class="fu">require_df</span>() <span class="sc">|&gt;</span></span>
+<span id="cb20-7"><a href="#cb20-7" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;age&quot;</span>, require_age)</span>
+<span id="cb20-8"><a href="#cb20-8" tabindex="-1"></a></span>
+<span id="cb20-9"><a href="#cb20-9" tabindex="-1"></a><span class="fu">validation_errors</span>(require_people, <span class="fu">data.frame</span>(<span class="at">age =</span> <span class="fu">c</span>(<span class="dv">30</span><span class="dt">L</span>, <span class="dv">150</span><span class="dt">L</span>)))</span>
+<span id="cb20-10"><a href="#cb20-10" tabindex="-1"></a><span class="co">#&gt; [1] &quot;people$age: must be in [0, 120]\n  Found: 150\n  At: 2&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb21"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a>require_layers <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;layers&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb21-2"><a href="#cb21-2" tabindex="-1"></a>  <span class="fu">require_class</span>(<span class="st">&quot;list&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb21-3"><a href="#cb21-3" tabindex="-1"></a>  <span class="fu">require_each</span>(<span class="fu">restrict</span>(<span class="st">&quot;layer&quot;</span>) <span class="sc">|&gt;</span> <span class="fu">require_numeric</span>())</span>
+<span id="cb21-4"><a href="#cb21-4" tabindex="-1"></a></span>
+<span id="cb21-5"><a href="#cb21-5" tabindex="-1"></a><span class="fu">validation_errors</span>(require_layers, <span class="fu">list</span>(<span class="dv">1</span>, <span class="st">&quot;a&quot;</span>, <span class="dv">3</span>))</span>
+<span id="cb21-6"><a href="#cb21-6" tabindex="-1"></a><span class="co">#&gt; [1] &quot;layers[[2]]: must be numeric, got character&quot;</span></span></code></pre></div>
+<p><code>allow_null()</code> marks an optional argument:
+<code>NULL</code> passes, anything else must satisfy every step.
+<code>require_valid()</code> includes another validator’s steps, and
+<code>require_any()</code> accepts a value that satisfies at least one
+alternative:</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>require_weights <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;weights&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a>  <span class="fu">require_positive</span>() <span class="sc">|&gt;</span></span>
+<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a>  <span class="fu">allow_null</span>()</span>
+<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a><span class="fu">require_weights</span>(<span class="cn">NULL</span>)</span>
+<span id="cb22-6"><a href="#cb22-6" tabindex="-1"></a></span>
+<span id="cb22-7"><a href="#cb22-7" tabindex="-1"></a>require_num_or_df <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;x&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a>  <span class="fu">require_any</span>(</span>
+<span id="cb22-9"><a href="#cb22-9" tabindex="-1"></a>    <span class="fu">restrict</span>(<span class="st">&quot;x&quot;</span>) <span class="sc">|&gt;</span> <span class="fu">require_numeric</span>(),</span>
+<span id="cb22-10"><a href="#cb22-10" tabindex="-1"></a>    <span class="fu">restrict</span>(<span class="st">&quot;x&quot;</span>) <span class="sc">|&gt;</span> <span class="fu">require_df</span>() <span class="sc">|&gt;</span> <span class="fu">require_has_cols</span>(<span class="st">&quot;value&quot;</span>)</span>
+<span id="cb22-11"><a href="#cb22-11" tabindex="-1"></a>  )</span>
+<span id="cb22-12"><a href="#cb22-12" tabindex="-1"></a><span class="fu">validation_errors</span>(require_num_or_df, <span class="st">&quot;a&quot;</span>)</span>
+<span id="cb22-13"><a href="#cb22-13" tabindex="-1"></a><span class="co">#&gt; [1] &quot;x: must satisfy one of:\n  - must be numeric, got character\n  - must be a data.frame, got character&quot;</span></span></code></pre></div>
+<p><code>require_between()</code> also bounds dates, times, durations
+and ordered factors:</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a>require_period <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;start&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a>  <span class="fu">require_between</span>(<span class="fu">as.Date</span>(<span class="st">&quot;2020-01-01&quot;</span>), <span class="fu">as.Date</span>(<span class="st">&quot;2020-12-31&quot;</span>))</span>
+<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a><span class="fu">validation_errors</span>(require_period, <span class="fu">as.Date</span>(<span class="st">&quot;2021-03-01&quot;</span>))</span>
+<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a><span class="co">#&gt; [1] &quot;start: must be in [2020-01-01, 2020-12-31]\n  Found: 2021-03-01&quot;</span></span></code></pre></div>
+</div>
+<div id="strings-paths-and-factor-levels" class="section level2">
+<h2>Strings, Paths, and Factor Levels</h2>
+<p>Character steps check every non-<code>NA</code> element:
+<code>require_pattern()</code> matches a regular expression,
+<code>require_nchar()</code> bounds the length and
+<code>require_nonempty()</code> rejects blank strings.</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>require_code <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;code&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>  <span class="fu">require_character</span>() <span class="sc">|&gt;</span></span>
+<span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>  <span class="fu">require_nonempty</span>() <span class="sc">|&gt;</span></span>
+<span id="cb24-4"><a href="#cb24-4" tabindex="-1"></a>  <span class="fu">require_pattern</span>(<span class="st">&quot;^[A-Z]{3}-[0-9]{2}$&quot;</span>)</span>
+<span id="cb24-5"><a href="#cb24-5" tabindex="-1"></a><span class="fu">validation_errors</span>(require_code, <span class="fu">c</span>(<span class="st">&quot;ABC-12&quot;</span>, <span class="st">&quot;abc-12&quot;</span>, <span class="st">&quot; &quot;</span>))</span>
+<span id="cb24-6"><a href="#cb24-6" tabindex="-1"></a><span class="co">#&gt; [1] &quot;code: must not contain blank strings\n  Found: \&quot; \&quot;\n  At: 3&quot;                    </span></span>
+<span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a><span class="co">#&gt; [2] &quot;code: must match pattern \&quot;^[A-Z]{3}-[0-9]{2}$\&quot;\n  Found: \&quot;abc-12\&quot;\n  At: 2, 3&quot;</span></span></code></pre></div>
+<p>File-system steps catch a bad input path or output directory at the
+top of a function. <code>Found:</code> shows the normalized path, so a
+relative path resolved against the wrong working directory is
+visible:</p>
+<div class="sourceCode" id="cb25"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a>require_input <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;path&quot;</span>) <span class="sc">|&gt;</span> <span class="fu">require_file_exists</span>(<span class="at">extension =</span> <span class="st">&quot;csv&quot;</span>)</span>
+<span id="cb25-2"><a href="#cb25-2" tabindex="-1"></a><span class="fu">validation_errors</span>(require_input, <span class="st">&quot;data/missing.csv&quot;</span>)</span>
+<span id="cb25-3"><a href="#cb25-3" tabindex="-1"></a><span class="co">#&gt; [1] &quot;path: must be an existing file\n  Found: \&quot;C:/Users/Gilles Colling/AppData/Local/Temp/Rtmp0wj2sX/Rbuild10dfc10f84865/restrictR/vignettes/data/missing.csv\&quot;&quot;</span></span></code></pre></div>
+<p>A factor with a level the model has not seen is the classic
+<code>predict()</code> failure. <code>require_levels()</code> compares
+against the training levels, and <code>require_names()</code> does the
+same for column names:</p>
+<div class="sourceCode" id="cb26"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" tabindex="-1"></a>train <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">g =</span> <span class="fu">factor</span>(<span class="fu">c</span>(<span class="st">&quot;a&quot;</span>, <span class="st">&quot;b&quot;</span>)), <span class="at">x =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">2</span>)</span>
+<span id="cb26-2"><a href="#cb26-2" tabindex="-1"></a>require_newdata <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;newdata&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb26-3"><a href="#cb26-3" tabindex="-1"></a>  <span class="fu">require_names</span>(<span class="fu">c</span>(<span class="st">&quot;g&quot;</span>, <span class="st">&quot;x&quot;</span>), <span class="at">mode =</span> <span class="st">&quot;superset&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb26-4"><a href="#cb26-4" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;g&quot;</span>, <span class="fu">restrict</span>(<span class="st">&quot;g&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb26-5"><a href="#cb26-5" tabindex="-1"></a>                 <span class="fu">require_levels</span>(<span class="fu">levels</span>(train<span class="sc">$</span>g), <span class="at">mode =</span> <span class="st">&quot;subset&quot;</span>))</span>
+<span id="cb26-6"><a href="#cb26-6" tabindex="-1"></a><span class="fu">validation_errors</span>(require_newdata,</span>
+<span id="cb26-7"><a href="#cb26-7" tabindex="-1"></a>                  <span class="fu">data.frame</span>(<span class="at">g =</span> <span class="fu">factor</span>(<span class="st">&quot;c&quot;</span>), <span class="at">x =</span> <span class="dv">3</span><span class="dt">L</span>))</span>
+<span id="cb26-8"><a href="#cb26-8" tabindex="-1"></a><span class="co">#&gt; [1] &quot;newdata$g: unexpected level: \&quot;c\&quot;&quot;</span></span></code></pre></div>
+</div>
+<div id="checking-without-stopping" class="section level2">
+<h2>Checking Without Stopping</h2>
+<p>By default a validator stops at the first failing step. Pass
+<code>.on_fail = &quot;all&quot;</code> to run every step and collect all
+violations in one report:</p>
+<div class="sourceCode" id="cb27"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" tabindex="-1"></a>messy_survey <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb27-2"><a href="#cb27-2" tabindex="-1"></a>  <span class="at">age =</span> <span class="fu">c</span>(<span class="dv">25</span>, <span class="sc">-</span><span class="dv">5</span>, <span class="dv">200</span>),</span>
+<span id="cb27-3"><a href="#cb27-3" tabindex="-1"></a>  <span class="at">income =</span> <span class="fu">c</span>(<span class="dv">35000</span>, <span class="cn">NA</span>, <span class="dv">45000</span>),</span>
+<span id="cb27-4"><a href="#cb27-4" tabindex="-1"></a>  <span class="at">status =</span> <span class="fu">c</span>(<span class="st">&quot;active&quot;</span>, <span class="st">&quot;banned&quot;</span>, <span class="st">&quot;active&quot;</span>)</span>
+<span id="cb27-5"><a href="#cb27-5" tabindex="-1"></a>)</span>
+<span id="cb27-6"><a href="#cb27-6" tabindex="-1"></a><span class="fu">require_survey</span>(messy_survey, <span class="at">.on_fail =</span> <span class="st">&quot;all&quot;</span>)</span>
+<span id="cb27-7"><a href="#cb27-7" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb27-8"><a href="#cb27-8" tabindex="-1"></a><span class="co">#&gt; ! 3 validation failures:</span></span>
+<span id="cb27-9"><a href="#cb27-9" tabindex="-1"></a><span class="co">#&gt; survey$age: must be in [0, 150]</span></span>
+<span id="cb27-10"><a href="#cb27-10" tabindex="-1"></a><span class="co">#&gt;   Found: -5</span></span>
+<span id="cb27-11"><a href="#cb27-11" tabindex="-1"></a><span class="co">#&gt;   At: 2, 3</span></span>
+<span id="cb27-12"><a href="#cb27-12" tabindex="-1"></a><span class="co">#&gt; survey$income: must not contain NA</span></span>
+<span id="cb27-13"><a href="#cb27-13" tabindex="-1"></a><span class="co">#&gt;   At: 2</span></span>
+<span id="cb27-14"><a href="#cb27-14" tabindex="-1"></a><span class="co">#&gt; survey$status: must be one of: &quot;active&quot;, &quot;inactive&quot;, &quot;pending&quot;</span></span>
+<span id="cb27-15"><a href="#cb27-15" tabindex="-1"></a><span class="co">#&gt;   Found: &quot;banned&quot;</span></span>
+<span id="cb27-16"><a href="#cb27-16" tabindex="-1"></a><span class="co">#&gt;   At: 2</span></span></code></pre></div>
+<p>To branch on validity in code, <code>is_valid()</code> returns a
+logical and <code>validation_errors()</code> returns the messages as a
+character vector, empty when the value passes:</p>
+<div class="sourceCode" id="cb28"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" tabindex="-1"></a><span class="fu">is_valid</span>(require_survey, good_survey)</span>
+<span id="cb28-2"><a href="#cb28-2" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb28-3"><a href="#cb28-3" tabindex="-1"></a><span class="fu">validation_errors</span>(require_survey, messy_survey)</span>
+<span id="cb28-4"><a href="#cb28-4" tabindex="-1"></a><span class="co">#&gt; [1] &quot;survey$age: must be in [0, 150]\n  Found: -5\n  At: 2, 3&quot;                                          </span></span>
+<span id="cb28-5"><a href="#cb28-5" tabindex="-1"></a><span class="co">#&gt; [2] &quot;survey$income: must not contain NA\n  At: 2&quot;                                                       </span></span>
+<span id="cb28-6"><a href="#cb28-6" tabindex="-1"></a><span class="co">#&gt; [3] &quot;survey$status: must be one of: \&quot;active\&quot;, \&quot;inactive\&quot;, \&quot;pending\&quot;\n  Found: \&quot;banned\&quot;\n  At: 2&quot;</span></span></code></pre></div>
+</div>
+<div id="testing-validators" class="section level2">
+<h2>Testing Validators</h2>
+<p><code>expect_valid()</code> and <code>expect_invalid()</code> are
+testthat expectations that report the validator’s own messages:</p>
+<div class="sourceCode" id="cb29"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" tabindex="-1"></a><span class="fu">test_that</span>(<span class="st">&quot;newdata contract&quot;</span>, {</span>
+<span id="cb29-2"><a href="#cb29-2" tabindex="-1"></a>  <span class="fu">expect_valid</span>(require_newdata, <span class="fu">data.frame</span>(<span class="at">g =</span> <span class="fu">factor</span>(<span class="st">&quot;a&quot;</span>), <span class="at">x =</span> <span class="dv">1</span><span class="dt">L</span>))</span>
+<span id="cb29-3"><a href="#cb29-3" tabindex="-1"></a>  <span class="fu">expect_invalid</span>(require_newdata, <span class="fu">data.frame</span>(<span class="at">x =</span> <span class="dv">1</span><span class="dt">L</span>), <span class="at">regexp =</span> <span class="st">&quot;missing required&quot;</span>)</span>
+<span id="cb29-4"><a href="#cb29-4" tabindex="-1"></a>})</span></code></pre></div>
+<p><code>steps()</code> returns the steps of a validator as a data.frame
+(label, context dependencies, parameters) for tooling:</p>
+<div class="sourceCode" id="cb30"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" tabindex="-1"></a><span class="fu">steps</span>(require_code)[, <span class="fu">c</span>(<span class="st">&quot;step&quot;</span>, <span class="st">&quot;label&quot;</span>)]</span>
+<span id="cb30-2"><a href="#cb30-2" tabindex="-1"></a><span class="co">#&gt;   step                                    label</span></span>
+<span id="cb30-3"><a href="#cb30-3" tabindex="-1"></a><span class="co">#&gt; 1    1                        must be character</span></span>
+<span id="cb30-4"><a href="#cb30-4" tabindex="-1"></a><span class="co">#&gt; 2    2           must not contain blank strings</span></span>
+<span id="cb30-5"><a href="#cb30-5" tabindex="-1"></a><span class="co">#&gt; 3    3 must match pattern &quot;^[A-Z]{3}-[0-9]{2}$&quot;</span></span></code></pre></div>
 </div>
 <div id="custom-steps" class="section level2">
 <h2>Custom Steps</h2>
 <p>For domain-specific invariants that don’t belong in the built-in set,
 use <code>require_custom()</code>. The step function receives
-<code>(value, name, ctx)</code> and should call <code>stop()</code> on
-failure:</p>
-<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>require_weights <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;weights&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>  <span class="fu">require_between</span>(<span class="at">lower =</span> <span class="dv">0</span>, <span class="at">upper =</span> <span class="dv">1</span>) <span class="sc">|&gt;</span></span>
-<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a>  <span class="fu">require_custom</span>(</span>
-<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a>    <span class="at">label =</span> <span class="st">&quot;must sum to 1&quot;</span>,</span>
-<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a>    <span class="at">fn =</span> <span class="cf">function</span>(value, name, ctx) {</span>
-<span id="cb15-7"><a href="#cb15-7" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">abs</span>(<span class="fu">sum</span>(value) <span class="sc">-</span> <span class="dv">1</span>) <span class="sc">&gt;</span> <span class="fl">1e-8</span>) {</span>
-<span id="cb15-8"><a href="#cb15-8" tabindex="-1"></a>        <span class="fu">stop</span>(<span class="fu">sprintf</span>(<span class="st">&quot;%s: must sum to 1, sums to %g&quot;</span>, name, <span class="fu">sum</span>(value)),</span>
-<span id="cb15-9"><a href="#cb15-9" tabindex="-1"></a>             <span class="at">call. =</span> <span class="cn">FALSE</span>)</span>
-<span id="cb15-10"><a href="#cb15-10" tabindex="-1"></a>      }</span>
-<span id="cb15-11"><a href="#cb15-11" tabindex="-1"></a>    }</span>
-<span id="cb15-12"><a href="#cb15-12" tabindex="-1"></a>  )</span></code></pre></div>
-<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a><span class="fu">require_weights</span>(<span class="fu">c</span>(<span class="fl">0.5</span>, <span class="fl">0.3</span>, <span class="fl">0.2</span>))</span></code></pre></div>
-<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="fu">require_weights</span>(<span class="fu">c</span>(<span class="fl">0.5</span>, <span class="fl">0.5</span>, <span class="fl">0.5</span>))</span>
-<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
-<span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a><span class="co">#&gt; ! weights: must sum to 1, sums to 1.5</span></span></code></pre></div>
+<code>(value, name, ctx)</code> and should call <code>fail()</code> on
+failure to produce the same structured errors as built-in steps:</p>
+<div class="sourceCode" id="cb31"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" tabindex="-1"></a>require_weights <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;weights&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb31-2"><a href="#cb31-2" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb31-3"><a href="#cb31-3" tabindex="-1"></a>  <span class="fu">require_between</span>(<span class="at">lower =</span> <span class="dv">0</span>, <span class="at">upper =</span> <span class="dv">1</span>) <span class="sc">|&gt;</span></span>
+<span id="cb31-4"><a href="#cb31-4" tabindex="-1"></a>  <span class="fu">require_custom</span>(</span>
+<span id="cb31-5"><a href="#cb31-5" tabindex="-1"></a>    <span class="at">label =</span> <span class="st">&quot;must sum to 1&quot;</span>,</span>
+<span id="cb31-6"><a href="#cb31-6" tabindex="-1"></a>    <span class="at">fn =</span> <span class="cf">function</span>(value, name, ctx) {</span>
+<span id="cb31-7"><a href="#cb31-7" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">abs</span>(<span class="fu">sum</span>(value) <span class="sc">-</span> <span class="dv">1</span>) <span class="sc">&gt;</span> <span class="fl">1e-8</span>) {</span>
+<span id="cb31-8"><a href="#cb31-8" tabindex="-1"></a>        <span class="fu">fail</span>(name, <span class="st">&quot;must sum to 1&quot;</span>,</span>
+<span id="cb31-9"><a href="#cb31-9" tabindex="-1"></a>             <span class="at">found =</span> <span class="fu">sprintf</span>(<span class="st">&quot;sum = %g&quot;</span>, <span class="fu">sum</span>(value)))</span>
+<span id="cb31-10"><a href="#cb31-10" tabindex="-1"></a>      }</span>
+<span id="cb31-11"><a href="#cb31-11" tabindex="-1"></a>    }</span>
+<span id="cb31-12"><a href="#cb31-12" tabindex="-1"></a>  )</span></code></pre></div>
+<div class="sourceCode" id="cb32"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" tabindex="-1"></a><span class="fu">require_weights</span>(<span class="fu">c</span>(<span class="fl">0.5</span>, <span class="fl">0.3</span>, <span class="fl">0.2</span>))</span></code></pre></div>
+<div class="sourceCode" id="cb33"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" tabindex="-1"></a><span class="fu">require_weights</span>(<span class="fu">c</span>(<span class="fl">0.5</span>, <span class="fl">0.5</span>, <span class="fl">0.5</span>))</span>
+<span id="cb33-2"><a href="#cb33-2" tabindex="-1"></a><span class="co">#&gt; Error:</span></span>
+<span id="cb33-3"><a href="#cb33-3" tabindex="-1"></a><span class="co">#&gt; ! weights: must sum to 1</span></span>
+<span id="cb33-4"><a href="#cb33-4" tabindex="-1"></a><span class="co">#&gt;   Found: sum = 1.5</span></span></code></pre></div>
 <p>Custom steps can also declare dependencies:</p>
-<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>require_probs <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;probs&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>  <span class="fu">require_custom</span>(</span>
-<span id="cb18-4"><a href="#cb18-4" tabindex="-1"></a>    <span class="at">label =</span> <span class="st">&quot;length must match number of classes&quot;</span>,</span>
-<span id="cb18-5"><a href="#cb18-5" tabindex="-1"></a>    <span class="at">deps =</span> <span class="st">&quot;n_classes&quot;</span>,</span>
-<span id="cb18-6"><a href="#cb18-6" tabindex="-1"></a>    <span class="at">fn =</span> <span class="cf">function</span>(value, name, ctx) {</span>
-<span id="cb18-7"><a href="#cb18-7" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">length</span>(value) <span class="sc">!=</span> ctx<span class="sc">$</span>n_classes) {</span>
-<span id="cb18-8"><a href="#cb18-8" tabindex="-1"></a>        <span class="fu">stop</span>(<span class="fu">sprintf</span>(<span class="st">&quot;%s: expected %d probabilities, got %d&quot;</span>,</span>
-<span id="cb18-9"><a href="#cb18-9" tabindex="-1"></a>                     name, ctx<span class="sc">$</span>n_classes, <span class="fu">length</span>(value)), <span class="at">call. =</span> <span class="cn">FALSE</span>)</span>
-<span id="cb18-10"><a href="#cb18-10" tabindex="-1"></a>      }</span>
-<span id="cb18-11"><a href="#cb18-11" tabindex="-1"></a>    }</span>
-<span id="cb18-12"><a href="#cb18-12" tabindex="-1"></a>  )</span>
-<span id="cb18-13"><a href="#cb18-13" tabindex="-1"></a></span>
-<span id="cb18-14"><a href="#cb18-14" tabindex="-1"></a><span class="fu">require_probs</span>(<span class="fu">c</span>(<span class="fl">0.3</span>, <span class="fl">0.7</span>), <span class="at">n_classes =</span> <span class="dv">2</span><span class="dt">L</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb34"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" tabindex="-1"></a>require_probs <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;probs&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb34-2"><a href="#cb34-2" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb34-3"><a href="#cb34-3" tabindex="-1"></a>  <span class="fu">require_custom</span>(</span>
+<span id="cb34-4"><a href="#cb34-4" tabindex="-1"></a>    <span class="at">label =</span> <span class="st">&quot;length must match number of classes&quot;</span>,</span>
+<span id="cb34-5"><a href="#cb34-5" tabindex="-1"></a>    <span class="at">deps =</span> <span class="st">&quot;n_classes&quot;</span>,</span>
+<span id="cb34-6"><a href="#cb34-6" tabindex="-1"></a>    <span class="at">fn =</span> <span class="cf">function</span>(value, name, ctx) {</span>
+<span id="cb34-7"><a href="#cb34-7" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">length</span>(value) <span class="sc">!=</span> ctx<span class="sc">$</span>n_classes) {</span>
+<span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a>        <span class="fu">fail</span>(name, <span class="fu">sprintf</span>(<span class="st">&quot;expected %d probabilities&quot;</span>, ctx<span class="sc">$</span>n_classes),</span>
+<span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a>             <span class="at">found =</span> <span class="fu">sprintf</span>(<span class="st">&quot;length %d&quot;</span>, <span class="fu">length</span>(value)))</span>
+<span id="cb34-10"><a href="#cb34-10" tabindex="-1"></a>      }</span>
+<span id="cb34-11"><a href="#cb34-11" tabindex="-1"></a>    }</span>
+<span id="cb34-12"><a href="#cb34-12" tabindex="-1"></a>  )</span>
+<span id="cb34-13"><a href="#cb34-13" tabindex="-1"></a></span>
+<span id="cb34-14"><a href="#cb34-14" tabindex="-1"></a><span class="fu">require_probs</span>(<span class="fu">c</span>(<span class="fl">0.3</span>, <span class="fl">0.7</span>), <span class="at">n_classes =</span> <span class="dv">2</span><span class="dt">L</span>)</span></code></pre></div>
 </div>
 <div id="self-documentation" class="section level2">
 <h2>Self-Documentation</h2>
 <p>Print a validator to see its full contract:</p>
-<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>require_newdata</span>
-<span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a><span class="co">#&gt; &lt;restriction newdata&gt;</span></span>
-<span id="cb19-3"><a href="#cb19-3" tabindex="-1"></a><span class="co">#&gt;   1. must be a data.frame</span></span>
-<span id="cb19-4"><a href="#cb19-4" tabindex="-1"></a><span class="co">#&gt;   2. must have columns: &quot;x1&quot;, &quot;x2&quot;</span></span>
-<span id="cb19-5"><a href="#cb19-5" tabindex="-1"></a><span class="co">#&gt;   3. $x1 must be numeric (no NA, finite)</span></span>
-<span id="cb19-6"><a href="#cb19-6" tabindex="-1"></a><span class="co">#&gt;   4. $x2 must be numeric (no NA, finite)</span></span>
-<span id="cb19-7"><a href="#cb19-7" tabindex="-1"></a><span class="co">#&gt;   5. must have at least 1 row</span></span></code></pre></div>
+<div class="sourceCode" id="cb35"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" tabindex="-1"></a>require_newdata</span>
+<span id="cb35-2"><a href="#cb35-2" tabindex="-1"></a><span class="co">#&gt; &lt;restriction newdata&gt;</span></span>
+<span id="cb35-3"><a href="#cb35-3" tabindex="-1"></a><span class="co">#&gt;   1. must have names: &quot;g&quot;, &quot;x&quot;</span></span>
+<span id="cb35-4"><a href="#cb35-4" tabindex="-1"></a><span class="co">#&gt;   2. $g: levels must be among: &quot;a&quot;, &quot;b&quot;</span></span></code></pre></div>
 <p>Use <code>as_contract_text()</code> to generate a one-line summary
 for roxygen <code>@param</code>:</p>
-<div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a><span class="fu">as_contract_text</span>(require_newdata)</span>
-<span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a><span class="co">#&gt; [1] &quot;Must be a data.frame. must have columns: \&quot;x1\&quot;, \&quot;x2\&quot;. $x1 must be numeric (no NA, finite). $x2 must be numeric (no NA, finite). must have at least 1 row.&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb36"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" tabindex="-1"></a><span class="fu">as_contract_text</span>(require_newdata)</span>
+<span id="cb36-2"><a href="#cb36-2" tabindex="-1"></a><span class="co">#&gt; [1] &quot;Must have names: \&quot;g\&quot;, \&quot;x\&quot;. $g: levels must be among: \&quot;a\&quot;, \&quot;b\&quot;.&quot;</span></span></code></pre></div>
 <p>Use <code>as_contract_block()</code> for multi-line output suitable
 for <code>@details</code>:</p>
-<div class="sourceCode" id="cb21"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">as_contract_block</span>(require_newdata))</span>
-<span id="cb21-2"><a href="#cb21-2" tabindex="-1"></a><span class="co">#&gt; - must be a data.frame</span></span>
-<span id="cb21-3"><a href="#cb21-3" tabindex="-1"></a><span class="co">#&gt; - must have columns: &quot;x1&quot;, &quot;x2&quot;</span></span>
-<span id="cb21-4"><a href="#cb21-4" tabindex="-1"></a><span class="co">#&gt; - $x1 must be numeric (no NA, finite)</span></span>
-<span id="cb21-5"><a href="#cb21-5" tabindex="-1"></a><span class="co">#&gt; - $x2 must be numeric (no NA, finite)</span></span>
-<span id="cb21-6"><a href="#cb21-6" tabindex="-1"></a><span class="co">#&gt; - must have at least 1 row</span></span></code></pre></div>
+<div class="sourceCode" id="cb37"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">as_contract_block</span>(require_newdata))</span>
+<span id="cb37-2"><a href="#cb37-2" tabindex="-1"></a><span class="co">#&gt; - must have names: &quot;g&quot;, &quot;x&quot;</span></span>
+<span id="cb37-3"><a href="#cb37-3" tabindex="-1"></a><span class="co">#&gt; - $g: levels must be among: &quot;a&quot;, &quot;b&quot;</span></span></code></pre></div>
 </div>
 <div id="using-contracts-in-packages" class="section level2">
 <h2>Using Contracts in Packages</h2>
-<p>The recommended pattern: define contracts in
-<code>R/contracts.R</code>, call them at the top of exported
+<p>The recommended pattern: define contracts near the top of the file
+that uses them, or in a dedicated <code>R/contracts.R</code> if several
+files share the same validators. Call them at the top of exported
 functions.</p>
-<div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a><span class="co"># R/contracts.R</span></span>
-<span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>require_newdata <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;newdata&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a>  <span class="fu">require_df</span>() <span class="sc">|&gt;</span></span>
-<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a>  <span class="fu">require_has_cols</span>(<span class="fu">c</span>(<span class="st">&quot;x1&quot;</span>, <span class="st">&quot;x2&quot;</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a>  <span class="fu">require_col_numeric</span>(<span class="st">&quot;x1&quot;</span>, <span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb22-6"><a href="#cb22-6" tabindex="-1"></a>  <span class="fu">require_col_numeric</span>(<span class="st">&quot;x2&quot;</span>, <span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb22-7"><a href="#cb22-7" tabindex="-1"></a></span>
-<span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a>require_pred <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;pred&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb22-9"><a href="#cb22-9" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
-<span id="cb22-10"><a href="#cb22-10" tabindex="-1"></a>  <span class="fu">require_length_matches</span>(<span class="sc">~</span> <span class="fu">nrow</span>(newdata))</span></code></pre></div>
-<div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a><span class="co"># R/predict.R</span></span>
-<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a></span>
-<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a><span class="co">#&#39; Predict from a fitted model</span></span>
-<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a><span class="co">#&#39;</span></span>
-<span id="cb23-5"><a href="#cb23-5" tabindex="-1"></a><span class="co">#&#39; @param newdata Must be a data.frame. must have columns: &quot;x1&quot;, &quot;x2&quot;. $x1 must be numeric (no NA, finite). $x2 must be numeric (no NA, finite). must have at least 1 row.</span></span>
-<span id="cb23-6"><a href="#cb23-6" tabindex="-1"></a><span class="co">#&#39; @param ... additional arguments passed to the underlying model.</span></span>
-<span id="cb23-7"><a href="#cb23-7" tabindex="-1"></a><span class="co">#&#39;</span></span>
-<span id="cb23-8"><a href="#cb23-8" tabindex="-1"></a><span class="co">#&#39; @export</span></span>
-<span id="cb23-9"><a href="#cb23-9" tabindex="-1"></a>my_predict <span class="ot">&lt;-</span> <span class="cf">function</span>(object, newdata, ...) {</span>
-<span id="cb23-10"><a href="#cb23-10" tabindex="-1"></a>  <span class="fu">require_newdata</span>(newdata)</span>
-<span id="cb23-11"><a href="#cb23-11" tabindex="-1"></a>  pred <span class="ot">&lt;-</span> <span class="fu">do_prediction</span>(object, newdata)</span>
-<span id="cb23-12"><a href="#cb23-12" tabindex="-1"></a>  <span class="fu">require_pred</span>(pred, <span class="at">newdata =</span> newdata)</span>
-<span id="cb23-13"><a href="#cb23-13" tabindex="-1"></a>  pred</span>
-<span id="cb23-14"><a href="#cb23-14" tabindex="-1"></a>}</span></code></pre></div>
+<div class="sourceCode" id="cb38"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" tabindex="-1"></a><span class="co"># R/contracts.R</span></span>
+<span id="cb38-2"><a href="#cb38-2" tabindex="-1"></a>require_feature <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;feature&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb38-3"><a href="#cb38-3" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb38-4"><a href="#cb38-4" tabindex="-1"></a></span>
+<span id="cb38-5"><a href="#cb38-5" tabindex="-1"></a>require_newdata <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;newdata&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb38-6"><a href="#cb38-6" tabindex="-1"></a>  <span class="fu">require_df</span>() <span class="sc">|&gt;</span></span>
+<span id="cb38-7"><a href="#cb38-7" tabindex="-1"></a>  <span class="fu">require_has_cols</span>(<span class="fu">c</span>(<span class="st">&quot;x1&quot;</span>, <span class="st">&quot;x2&quot;</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb38-8"><a href="#cb38-8" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;x1&quot;</span>, require_feature) <span class="sc">|&gt;</span></span>
+<span id="cb38-9"><a href="#cb38-9" tabindex="-1"></a>  <span class="fu">require_col</span>(<span class="st">&quot;x2&quot;</span>, require_feature)</span>
+<span id="cb38-10"><a href="#cb38-10" tabindex="-1"></a></span>
+<span id="cb38-11"><a href="#cb38-11" tabindex="-1"></a>require_pred <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;pred&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb38-12"><a href="#cb38-12" tabindex="-1"></a>  <span class="fu">require_numeric</span>(<span class="at">no_na =</span> <span class="cn">TRUE</span>, <span class="at">finite =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb38-13"><a href="#cb38-13" tabindex="-1"></a>  <span class="fu">require_length_matches</span>(<span class="sc">~</span> <span class="fu">nrow</span>(newdata))</span></code></pre></div>
+<div class="sourceCode" id="cb39"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" tabindex="-1"></a><span class="co"># R/predict.R</span></span>
+<span id="cb39-2"><a href="#cb39-2" tabindex="-1"></a></span>
+<span id="cb39-3"><a href="#cb39-3" tabindex="-1"></a><span class="co">#&#39; Predict from a fitted model</span></span>
+<span id="cb39-4"><a href="#cb39-4" tabindex="-1"></a><span class="co">#&#39;</span></span>
+<span id="cb39-5"><a href="#cb39-5" tabindex="-1"></a><span class="co">#&#39; @param newdata Must have names: &quot;g&quot;, &quot;x&quot;. $g: levels must be among: &quot;a&quot;, &quot;b&quot;.</span></span>
+<span id="cb39-6"><a href="#cb39-6" tabindex="-1"></a><span class="co">#&#39; @param ... additional arguments passed to the underlying model.</span></span>
+<span id="cb39-7"><a href="#cb39-7" tabindex="-1"></a><span class="co">#&#39;</span></span>
+<span id="cb39-8"><a href="#cb39-8" tabindex="-1"></a><span class="co">#&#39; @export</span></span>
+<span id="cb39-9"><a href="#cb39-9" tabindex="-1"></a>my_predict <span class="ot">&lt;-</span> <span class="cf">function</span>(object, newdata, ...) {</span>
+<span id="cb39-10"><a href="#cb39-10" tabindex="-1"></a>  <span class="fu">require_newdata</span>(newdata)</span>
+<span id="cb39-11"><a href="#cb39-11" tabindex="-1"></a>  pred <span class="ot">&lt;-</span> <span class="fu">do_prediction</span>(object, newdata)</span>
+<span id="cb39-12"><a href="#cb39-12" tabindex="-1"></a>  <span class="fu">require_pred</span>(pred, <span class="at">newdata =</span> newdata)</span>
+<span id="cb39-13"><a href="#cb39-13" tabindex="-1"></a>  pred</span>
+<span id="cb39-14"><a href="#cb39-14" tabindex="-1"></a>}</span></code></pre></div>
 <p>Contracts compose naturally with the pipe and branch safely (each
 <code>|&gt;</code> creates a new validator):</p>
-<div class="sourceCode" id="cb24"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>base <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;x&quot;</span>) <span class="sc">|&gt;</span> <span class="fu">require_numeric</span>()</span>
-<span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>v1 <span class="ot">&lt;-</span> base <span class="sc">|&gt;</span> <span class="fu">require_length</span>(<span class="dv">1</span><span class="dt">L</span>)</span>
-<span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>v2 <span class="ot">&lt;-</span> base <span class="sc">|&gt;</span> <span class="fu">require_between</span>(<span class="at">lower =</span> <span class="dv">0</span>)</span>
-<span id="cb24-4"><a href="#cb24-4" tabindex="-1"></a></span>
-<span id="cb24-5"><a href="#cb24-5" tabindex="-1"></a><span class="co"># base is unchanged</span></span>
-<span id="cb24-6"><a href="#cb24-6" tabindex="-1"></a><span class="fu">length</span>(<span class="fu">environment</span>(base)<span class="sc">$</span>steps)</span>
-<span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a><span class="co">#&gt; [1] 1</span></span>
-<span id="cb24-8"><a href="#cb24-8" tabindex="-1"></a><span class="fu">length</span>(<span class="fu">environment</span>(v1)<span class="sc">$</span>steps)</span>
-<span id="cb24-9"><a href="#cb24-9" tabindex="-1"></a><span class="co">#&gt; [1] 2</span></span>
-<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="fu">length</span>(<span class="fu">environment</span>(v2)<span class="sc">$</span>steps)</span>
-<span id="cb24-11"><a href="#cb24-11" tabindex="-1"></a><span class="co">#&gt; [1] 2</span></span></code></pre></div>
-<div class="sourceCode" id="cb25"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span>
-<span id="cb25-2"><a href="#cb25-2" tabindex="-1"></a><span class="co">#&gt; R version 4.5.2 (2025-10-31 ucrt)</span></span>
-<span id="cb25-3"><a href="#cb25-3" tabindex="-1"></a><span class="co">#&gt; Platform: x86_64-w64-mingw32/x64</span></span>
-<span id="cb25-4"><a href="#cb25-4" tabindex="-1"></a><span class="co">#&gt; Running under: Windows 11 x64 (build 26200)</span></span>
-<span id="cb25-5"><a href="#cb25-5" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb25-6"><a href="#cb25-6" tabindex="-1"></a><span class="co">#&gt; Matrix products: default</span></span>
-<span id="cb25-7"><a href="#cb25-7" tabindex="-1"></a><span class="co">#&gt;   LAPACK version 3.12.1</span></span>
-<span id="cb25-8"><a href="#cb25-8" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb25-9"><a href="#cb25-9" tabindex="-1"></a><span class="co">#&gt; locale:</span></span>
-<span id="cb25-10"><a href="#cb25-10" tabindex="-1"></a><span class="co">#&gt; [1] LC_COLLATE=C                          </span></span>
-<span id="cb25-11"><a href="#cb25-11" tabindex="-1"></a><span class="co">#&gt; [2] LC_CTYPE=English_United States.utf8   </span></span>
-<span id="cb25-12"><a href="#cb25-12" tabindex="-1"></a><span class="co">#&gt; [3] LC_MONETARY=English_United States.utf8</span></span>
-<span id="cb25-13"><a href="#cb25-13" tabindex="-1"></a><span class="co">#&gt; [4] LC_NUMERIC=C                          </span></span>
-<span id="cb25-14"><a href="#cb25-14" tabindex="-1"></a><span class="co">#&gt; [5] LC_TIME=English_United States.utf8    </span></span>
-<span id="cb25-15"><a href="#cb25-15" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb25-16"><a href="#cb25-16" tabindex="-1"></a><span class="co">#&gt; time zone: Europe/Luxembourg</span></span>
-<span id="cb25-17"><a href="#cb25-17" tabindex="-1"></a><span class="co">#&gt; tzcode source: internal</span></span>
-<span id="cb25-18"><a href="#cb25-18" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb25-19"><a href="#cb25-19" tabindex="-1"></a><span class="co">#&gt; attached base packages:</span></span>
-<span id="cb25-20"><a href="#cb25-20" tabindex="-1"></a><span class="co">#&gt; [1] stats     graphics  grDevices utils     datasets  methods   base     </span></span>
-<span id="cb25-21"><a href="#cb25-21" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb25-22"><a href="#cb25-22" tabindex="-1"></a><span class="co">#&gt; other attached packages:</span></span>
-<span id="cb25-23"><a href="#cb25-23" tabindex="-1"></a><span class="co">#&gt; [1] restrictR_0.1.0</span></span>
-<span id="cb25-24"><a href="#cb25-24" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb25-25"><a href="#cb25-25" tabindex="-1"></a><span class="co">#&gt; loaded via a namespace (and not attached):</span></span>
-<span id="cb25-26"><a href="#cb25-26" tabindex="-1"></a><span class="co">#&gt;  [1] digest_0.6.39     R6_2.6.1          fastmap_1.2.0     xfun_0.55        </span></span>
-<span id="cb25-27"><a href="#cb25-27" tabindex="-1"></a><span class="co">#&gt;  [5] glue_1.8.0        cachem_1.1.0      knitr_1.51        htmltools_0.5.9  </span></span>
-<span id="cb25-28"><a href="#cb25-28" tabindex="-1"></a><span class="co">#&gt;  [9] rmarkdown_2.30    lifecycle_1.0.5   cli_3.6.5         vctrs_0.7.1      </span></span>
-<span id="cb25-29"><a href="#cb25-29" tabindex="-1"></a><span class="co">#&gt; [13] svglite_2.2.2     sass_0.4.10       textshaping_1.0.4 jquerylib_0.1.4  </span></span>
-<span id="cb25-30"><a href="#cb25-30" tabindex="-1"></a><span class="co">#&gt; [17] systemfonts_1.3.1 compiler_4.5.2    tools_4.5.2       pillar_1.11.1    </span></span>
-<span id="cb25-31"><a href="#cb25-31" tabindex="-1"></a><span class="co">#&gt; [21] evaluate_1.0.5    bslib_0.9.0       yaml_2.3.12       otel_0.2.0       </span></span>
-<span id="cb25-32"><a href="#cb25-32" tabindex="-1"></a><span class="co">#&gt; [25] rlang_1.1.7       jsonlite_2.0.0</span></span></code></pre></div>
+<div class="sourceCode" id="cb40"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" tabindex="-1"></a>base <span class="ot">&lt;-</span> <span class="fu">restrict</span>(<span class="st">&quot;x&quot;</span>) <span class="sc">|&gt;</span> <span class="fu">require_numeric</span>()</span>
+<span id="cb40-2"><a href="#cb40-2" tabindex="-1"></a>v1 <span class="ot">&lt;-</span> base <span class="sc">|&gt;</span> <span class="fu">require_length</span>(<span class="dv">1</span><span class="dt">L</span>)</span>
+<span id="cb40-3"><a href="#cb40-3" tabindex="-1"></a>v2 <span class="ot">&lt;-</span> base <span class="sc">|&gt;</span> <span class="fu">require_between</span>(<span class="at">lower =</span> <span class="dv">0</span>)</span>
+<span id="cb40-4"><a href="#cb40-4" tabindex="-1"></a></span>
+<span id="cb40-5"><a href="#cb40-5" tabindex="-1"></a><span class="co"># base is unchanged</span></span>
+<span id="cb40-6"><a href="#cb40-6" tabindex="-1"></a><span class="fu">length</span>(<span class="fu">environment</span>(base)<span class="sc">$</span>steps)</span>
+<span id="cb40-7"><a href="#cb40-7" tabindex="-1"></a><span class="co">#&gt; [1] 1</span></span>
+<span id="cb40-8"><a href="#cb40-8" tabindex="-1"></a><span class="fu">length</span>(<span class="fu">environment</span>(v1)<span class="sc">$</span>steps)</span>
+<span id="cb40-9"><a href="#cb40-9" tabindex="-1"></a><span class="co">#&gt; [1] 2</span></span>
+<span id="cb40-10"><a href="#cb40-10" tabindex="-1"></a><span class="fu">length</span>(<span class="fu">environment</span>(v2)<span class="sc">$</span>steps)</span>
+<span id="cb40-11"><a href="#cb40-11" tabindex="-1"></a><span class="co">#&gt; [1] 2</span></span></code></pre></div>
+</div>
+<div id="relation-to-checkmate" class="section level2">
+<h2>Relation to checkmate</h2>
+<p>The <a href="https://CRAN.R-project.org/package=checkmate">checkmate</a>
+package covers similar ground with a different emphasis. Its
+<code>assert*</code>/<code>check*</code>/<code>test*</code> families
+provide fast, C-backed checks that you call inline, one per argument,
+where the check is needed. <code>restrictR</code> instead lets you name
+a contract once as a <code>|&gt;</code> chain and reuse that callable
+validator across functions, compose and branch it immutably, and have it
+print and document itself via <code>as_contract_text()</code>. Use
+checkmate when you want quick inline assertions; use
+<code>restrictR</code> when the same contract recurs across functions
+and you want a single definition that also serves as documentation. The
+two interoperate: a checkmate assertion can live inside a
+<code>require_custom()</code> step.</p>
+<div class="sourceCode" id="cb41"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span>
+<span id="cb41-2"><a href="#cb41-2" tabindex="-1"></a><span class="co">#&gt; R version 4.6.1 (2026-06-24 ucrt)</span></span>
+<span id="cb41-3"><a href="#cb41-3" tabindex="-1"></a><span class="co">#&gt; Platform: x86_64-w64-mingw32/x64</span></span>
+<span id="cb41-4"><a href="#cb41-4" tabindex="-1"></a><span class="co">#&gt; Running under: Windows 11 x64 (build 26200)</span></span>
+<span id="cb41-5"><a href="#cb41-5" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb41-6"><a href="#cb41-6" tabindex="-1"></a><span class="co">#&gt; Matrix products: default</span></span>
+<span id="cb41-7"><a href="#cb41-7" tabindex="-1"></a><span class="co">#&gt;   LAPACK version 3.12.1</span></span>
+<span id="cb41-8"><a href="#cb41-8" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb41-9"><a href="#cb41-9" tabindex="-1"></a><span class="co">#&gt; locale:</span></span>
+<span id="cb41-10"><a href="#cb41-10" tabindex="-1"></a><span class="co">#&gt; [1] LC_COLLATE=C                          </span></span>
+<span id="cb41-11"><a href="#cb41-11" tabindex="-1"></a><span class="co">#&gt; [2] LC_CTYPE=English_United States.utf8   </span></span>
+<span id="cb41-12"><a href="#cb41-12" tabindex="-1"></a><span class="co">#&gt; [3] LC_MONETARY=English_United States.utf8</span></span>
+<span id="cb41-13"><a href="#cb41-13" tabindex="-1"></a><span class="co">#&gt; [4] LC_NUMERIC=C                          </span></span>
+<span id="cb41-14"><a href="#cb41-14" tabindex="-1"></a><span class="co">#&gt; [5] LC_TIME=English_United States.utf8    </span></span>
+<span id="cb41-15"><a href="#cb41-15" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb41-16"><a href="#cb41-16" tabindex="-1"></a><span class="co">#&gt; time zone: Europe/Luxembourg</span></span>
+<span id="cb41-17"><a href="#cb41-17" tabindex="-1"></a><span class="co">#&gt; tzcode source: internal</span></span>
+<span id="cb41-18"><a href="#cb41-18" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb41-19"><a href="#cb41-19" tabindex="-1"></a><span class="co">#&gt; attached base packages:</span></span>
+<span id="cb41-20"><a href="#cb41-20" tabindex="-1"></a><span class="co">#&gt; [1] stats     graphics  grDevices utils     datasets  methods   base     </span></span>
+<span id="cb41-21"><a href="#cb41-21" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb41-22"><a href="#cb41-22" tabindex="-1"></a><span class="co">#&gt; other attached packages:</span></span>
+<span id="cb41-23"><a href="#cb41-23" tabindex="-1"></a><span class="co">#&gt; [1] restrictR_0.3.0</span></span>
+<span id="cb41-24"><a href="#cb41-24" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb41-25"><a href="#cb41-25" tabindex="-1"></a><span class="co">#&gt; loaded via a namespace (and not attached):</span></span>
+<span id="cb41-26"><a href="#cb41-26" tabindex="-1"></a><span class="co">#&gt;  [1] digest_0.6.39     R6_2.6.1          fastmap_1.2.0     xfun_0.60        </span></span>
+<span id="cb41-27"><a href="#cb41-27" tabindex="-1"></a><span class="co">#&gt;  [5] glue_1.8.1        cachem_1.1.0      knitr_1.52        htmltools_0.5.9  </span></span>
+<span id="cb41-28"><a href="#cb41-28" tabindex="-1"></a><span class="co">#&gt;  [9] rmarkdown_2.32    lifecycle_1.0.5   cli_3.6.6         vctrs_0.7.3      </span></span>
+<span id="cb41-29"><a href="#cb41-29" tabindex="-1"></a><span class="co">#&gt; [13] svglite_2.2.2     sass_0.4.10       textshaping_1.0.5 jquerylib_0.1.4  </span></span>
+<span id="cb41-30"><a href="#cb41-30" tabindex="-1"></a><span class="co">#&gt; [17] systemfonts_1.3.2 compiler_4.6.1    tools_4.6.1       pillar_1.11.1    </span></span>
+<span id="cb41-31"><a href="#cb41-31" tabindex="-1"></a><span class="co">#&gt; [21] evaluate_1.0.5    bslib_0.12.0      yaml_2.3.12       otel_0.2.0       </span></span>
+<span id="cb41-32"><a href="#cb41-32" tabindex="-1"></a><span class="co">#&gt; [25] rlang_1.3.0       jsonlite_2.0.0</span></span></code></pre></div>
 </div>
 
 

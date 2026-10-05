@@ -23,6 +23,21 @@
 #' nrow(newdata))`), the validator checks that all required context is present
 #' before running any steps and errors early if not.
 #'
+#' By default a validator is fail-fast: the first failing step stops with its
+#' error. Pass `.on_fail = "all"` to run every step and report all violations
+#' in one aggregated error:
+#'
+#' ```
+#' require_pred(out, .on_fail = "all")
+#' ```
+#'
+#' In `"all"` mode a type or structure guard (wrong type, not a data.frame,
+#' missing column) is reported once per path: later steps that fail the same
+#' guard on the same path are not repeated. Independent value failures are all
+#' reported.
+#'
+#' For a non-throwing result, use [is_valid()] or [validation_errors()].
+#'
 #' @examples
 #' # Define a validator
 #' require_positive <- restrict("x") |>
@@ -66,8 +81,12 @@ make_validator <- function(name, steps) {
 
   # Precompute union of all deps for early context checking
   all_deps <- unique(unlist(lapply(steps, function(s) s$deps)))
+  null_ok <- any(vapply(steps, function(s) isTRUE(s$null_ok), logical(1L)))
 
-  validator <- function(value, ..., .ctx = NULL) {
+  validator <- function(value, ..., .ctx = NULL,
+                        .on_fail = c("first", "all")) {
+    on_fail <- match.arg(.on_fail)
+    if (null_ok && is.null(value)) return(invisible(value))
     ctx <- c(list(...), .ctx %||% list())
     # Deduplicate: ... wins over .ctx
     ctx <- ctx[!duplicated(names(ctx))]
@@ -85,10 +104,9 @@ make_validator <- function(name, steps) {
       }
     }
 
-    s <- steps
-    nm <- name
-    for (i in seq_along(s)) {
-      s[[i]]$fn(value, nm, ctx)
+    failures <- run_steps(steps, value, name, ctx, on_fail)
+    if (length(failures) > 0L) {
+      stop(restrictR_failures(failures))
     }
     invisible(value)
   }
@@ -98,14 +116,63 @@ make_validator <- function(name, steps) {
 }
 
 
+#' Run Validation Steps
+#'
+#' The single runner behind validators and the combinators that apply
+#' validators to parts of a value (`require_col()`, `require_each()`, ...).
+#'
+#' In `"first"` mode the first failing step raises its `restrictR_failure`.
+#' In `"all"` mode every step runs and the failures are returned as a list;
+#' only the first precondition failure per path is kept, so one wrong type is
+#' not repeated once per step. A step may supply `collect`, a function
+#' `(value, name, ctx)` returning a list of failures, when it runs nested steps
+#' and needs to report each inner failure separately.
+#'
+#' @param steps list of step objects.
+#' @param value the value being validated.
+#' @param name path used in error messages.
+#' @param ctx named list of context values.
+#' @param on_fail `"first"` or `"all"`.
+#'
+#' @return A list of `restrictR_failure` conditions (always empty in `"first"`
+#'   mode, which raises instead).
+#'
+#' @noRd
+run_steps <- function(steps, value, name, ctx, on_fail) {
+  if (on_fail == "first") {
+    for (s in steps) s$fn(value, name, ctx)
+    return(list())
+  }
+  failures <- list()
+  precondition_paths <- character(0L)
+  for (s in steps) {
+    found <- if (is.null(s$collect)) {
+      tryCatch({
+        s$fn(value, name, ctx)
+        list()
+      }, restrictR_failure = function(f) list(f))
+    } else {
+      s$collect(value, name, ctx)
+    }
+    for (f in found) {
+      if (inherits(f, "restrictR_precondition")) {
+        if (f$path %in% precondition_paths) next
+        precondition_paths <- c(precondition_paths, f$path)
+      }
+      failures[[length(failures) + 1L]] <- f
+    }
+  }
+  failures
+}
+
+
 #' Add a Validation Step to a Restriction
 #'
 #' Returns a new validator closure with the step appended. Never mutates
 #' the original.
 #'
 #' @param restriction a `restriction` object.
-#' @param step a list with `label` (character), `deps` (character vector),
-#'   `fields` (named list or NULL), and `fn` (function(value, name, ctx)).
+#' @param step a step list built by `new_step()`.
 #'
 #' @return A new `restriction` object with the step appended.
 #'
@@ -115,9 +182,35 @@ add_step <- function(restriction, step) {
     stop("first argument must be a `restriction` object created by restrict()",
          call. = FALSE)
   }
-  old_name <- restriction_name(restriction)
-  old_steps <- restriction_steps(restriction)
-  make_validator(old_name, c(old_steps, list(step)))
+  add_steps(restriction, list(step))
+}
+
+
+#' Append Several Steps to a Restriction
+#'
+#' @param restriction a `restriction` object.
+#' @param steps list of step objects.
+#'
+#' @return A new `restriction` object.
+#'
+#' @noRd
+add_steps <- function(restriction, steps) {
+  make_validator(restriction_name(restriction),
+                 c(restriction_steps(restriction), steps))
+}
+
+
+#' Validate a Restriction Argument
+#'
+#' @param x the object to check.
+#' @param arg argument name for the error message.
+#'
+#' @noRd
+check_restriction <- function(x, arg = "validator") {
+  if (!inherits(x, "restriction")) {
+    stop(sprintf("`%s` must be a restriction object created by restrict()",
+                 arg), call. = FALSE)
+  }
 }
 
 
@@ -145,6 +238,45 @@ restriction_steps <- function(x) {
 }
 
 
+#' Access Validator Context Dependencies
+#'
+#' @param x a `restriction` object.
+#'
+#' @return character vector of context names.
+#'
+#' @noRd
+restriction_deps <- function(x) {
+  environment(x)$all_deps %||% character(0L)
+}
+
+
+#' Whether a Validator Accepts NULL
+#'
+#' @param x a `restriction` object.
+#'
+#' @return logical(1).
+#'
+#' @noRd
+restriction_null_ok <- function(x) {
+  isTRUE(environment(x)$null_ok)
+}
+
+
+#' Constraint Labels of a Validator
+#'
+#' The step labels, without the `allow_null()` marker.
+#'
+#' @param x a `restriction` object.
+#'
+#' @return character vector.
+#'
+#' @noRd
+constraint_labels <- function(x) {
+  steps <- Filter(function(s) !isTRUE(s$null_ok), restriction_steps(x))
+  vapply(steps, function(s) s$label, character(1L))
+}
+
+
 #' @export
 print.restriction <- function(x, ...) {
   nm <- restriction_name(x)
@@ -168,6 +300,38 @@ print.restriction <- function(x, ...) {
 }
 
 
+#' List the Steps of a Validator
+#'
+#' Returns the steps of a validator as a data.frame, one row per step in the
+#' order they run, for introspection and tooling. It shows the same steps as
+#' `print()`.
+#'
+#' @param x a `restriction` object.
+#'
+#' @return A data.frame with the columns `step` (position), `label` (the
+#'   description shown by `print()`), `deps` (list column: context names the
+#'   step needs) and `fields` (list column: the parameters the step was built
+#'   with, `NULL` when it has none).
+#'
+#' @examples
+#' v <- restrict("x") |> require_numeric(no_na = TRUE) |> require_between(0, 1)
+#' steps(v)
+#' steps(v)$fields[[2]]
+#'
+#' @family core
+#' @export
+steps <- function(x) {
+  check_restriction(x, "x")
+  s <- restriction_steps(x)
+  out <- data.frame(step = seq_along(s),
+                    label = vapply(s, function(st) st$label, character(1L)),
+                    stringsAsFactors = FALSE)
+  out$deps <- lapply(s, function(st) st$deps)
+  out$fields <- lapply(s, function(st) st$fields)
+  out
+}
+
+
 #' Convert a Validator to Plain Text
 #'
 #' Produces a single-line text summary suitable for roxygen `@param`
@@ -188,15 +352,18 @@ as_contract_text <- function(x) {
   if (!inherits(x, "restriction")) {
     stop("`x` must be a restriction object", call. = FALSE)
   }
-  steps <- restriction_steps(x)
-  if (length(steps) == 0L) return("No validation constraints.")
-  labels <- vapply(steps, function(s) s$label, character(1L))
-  # Capitalize first, collapse with periods
-  labels[1L] <- paste0(
-    toupper(substring(labels[1L], 1L, 1L)),
-    substring(labels[1L], 2L)
+  labels <- constraint_labels(x)
+  null_ok <- restriction_null_ok(x)
+  if (length(labels) == 0L) {
+    return(if (null_ok) "May be NULL." else "No validation constraints.")
+  }
+  # Capitalize each sentence
+  labels <- paste0(
+    toupper(substring(labels, 1L, 1L)),
+    substring(labels, 2L)
   )
-  paste0(paste(labels, collapse = ". "), ".")
+  text <- paste0(paste(labels, collapse = ". "), ".")
+  if (null_ok) paste0("NULL, or: ", text) else text
 }
 
 
@@ -219,9 +386,15 @@ as_contract_block <- function(x) {
   if (!inherits(x, "restriction")) {
     stop("`x` must be a restriction object", call. = FALSE)
   }
-  steps <- restriction_steps(x)
-  if (length(steps) == 0L) return("No validation constraints.")
-  labels <- vapply(steps, function(s) s$label, character(1L))
+  labels <- constraint_labels(x)
+  null_ok <- restriction_null_ok(x)
+  if (length(labels) == 0L) {
+    return(if (null_ok) "- may be NULL" else "No validation constraints.")
+  }
+  if (null_ok) {
+    return(paste(c("- may be NULL; otherwise:", paste0("  - ", labels)),
+                 collapse = "\n"))
+  }
   paste0("- ", labels, collapse = "\n")
 }
 
@@ -235,7 +408,8 @@ as_contract_block <- function(x) {
 #' @param restriction a `restriction` object.
 #' @param label character(1) human-readable description for printing.
 #' @param fn a function with signature `function(value, name, ctx)` that
-#'   calls `stop()` or `restrictR:::fail()` on failure.
+#'   calls [fail()] on validation failure. It must be callable with three
+#'   positional arguments (see [require_function()]).
 #' @param deps character vector of context names this step requires
 #'   (default: none).
 #'
@@ -249,8 +423,7 @@ as_contract_block <- function(x) {
 #'     fn = function(value, name, ctx) {
 #'       dupes <- which(duplicated(value))
 #'       if (length(dupes) > 0L) {
-#'         stop(sprintf("%s: contains %d duplicate value(s)",
-#'                      name, length(dupes)), call. = FALSE)
+#'         fail(name, "contains duplicates", at = dupes)
 #'       }
 #'     }
 #'   )
@@ -258,14 +431,7 @@ as_contract_block <- function(x) {
 #' @family core
 #' @export
 require_custom <- function(restriction, label, fn, deps = character(0L)) {
-  if (!is.function(fn)) {
-    stop("`fn` must be a function with signature function(value, name, ctx)",
-         call. = FALSE)
-  }
-  add_step(restriction, list(
-    label = label,
-    deps = deps,
-    fields = list(custom = TRUE),
-    fn = fn
-  ))
+  restrict("fn") |> require_function(nargs = 3L) |> (\(v) v(fn))()
+  add_step(restriction, new_step(label, fn, deps = deps,
+                                 fields = list(custom = TRUE)))
 }

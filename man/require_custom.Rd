@@ -12,7 +12,8 @@ require_custom(restriction, label, fn, deps = character(0L))
 \item{label}{character(1) human-readable description for printing.}
 
 \item{fn}{a function with signature \verb{function(value, name, ctx)} that
-calls \code{stop()} or \code{restrictR:::fail()} on failure.}
+calls \code{\link[=fail]{fail()}} on validation failure. It must be callable with three
+positional arguments (see \code{\link[=require_function]{require_function()}}).}
 
 \item{deps}{character vector of context names this step requires
 (default: none).}
@@ -23,7 +24,7 @@ A new \code{restriction} object with the custom step appended.
 \description{
 Allows advanced users to define their own validation step without
 growing the package's built-in API surface. The step function receives
-\verb{(value, name, ctx)} and should call \code{\link[testthat:fail]{testthat::fail()}} on validation failure.
+\verb{(value, name, ctx)} and should call \code{\link[=fail]{fail()}} on validation failure.
 }
 \examples{
 # Custom step: require all values to be unique
@@ -33,17 +34,20 @@ require_unique_id <- restrict("id") |>
     fn = function(value, name, ctx) {
       dupes <- which(duplicated(value))
       if (length(dupes) > 0L) {
-        stop(sprintf("\%s: contains \%d duplicate value(s)",
-                     name, length(dupes)), call. = FALSE)
+        fail(name, "contains duplicates", at = dupes)
       }
     }
   )
 
 }
 \seealso{
-Other core: 
-\code{\link{as_contract_block}()},
-\code{\link{as_contract_text}()},
-\code{\link{restrict}()}
+Other core:
+\code{\link[=as_contract_block]{as_contract_block()}},
+\code{\link[=as_contract_text]{as_contract_text()}},
+\code{\link[=fail]{fail()}},
+\code{\link[=is_valid]{is_valid()}},
+\code{\link[=restrict]{restrict()}},
+\code{\link[=steps]{steps()}},
+\code{\link[=validation_errors]{validation_errors()}}
 }
 \concept{core}

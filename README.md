@@ -1,83 +1,95 @@
 # restrictR
 
+*the same input check, written once*
+
+[![CRAN status](https://www.r-pkg.org/badges/version/restrictR)](https://CRAN.R-project.org/package=restrictR)
+[![CRAN downloads](https://cranlogs.r-pkg.org/badges/grand-total/restrictR)](https://cran.r-project.org/package=restrictR)
+[![Monthly downloads](https://cranlogs.r-pkg.org/badges/restrictR)](https://cran.r-project.org/package=restrictR)
 [![R-CMD-check](https://github.com/gcol33/restrictR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/gcol33/restrictR/actions/workflows/R-CMD-check.yaml)
 [![Codecov test coverage](https://codecov.io/gh/gcol33/restrictR/graph/badge.svg)](https://app.codecov.io/gh/gcol33/restrictR)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Composable Runtime Contracts for R**
+**Composable runtime contracts for R, built from base pipe chains into immutable validator closures.**
 
-The `restrictR` package lets you **define reusable input contracts** from small building blocks using the base pipe `|>`. Define a validator once, enforce it anywhere. Validators compose naturally, support dependent rules via formulas, and produce clear, path-aware error messages. No DSL, no operator overloading, just idiomatic R.
-
-## Quick Start
+Write each input contract once. `restrictR` turns a `|>` chain of small `require_*()`
+steps into a callable validator you drop at the top of any function. Every `|>`
+returns a new validator, so you branch from a shared base without touching it, and
+every failure comes back in one structured `path: message` format. No DSL, no operator
+overloading; a validator is an ordinary R closure you can pass around, print, and read
+back as documentation.
 
 ```r
 library(restrictR)
 
-# Define once
+# define once
 require_positive_scalar <- restrict("x") |>
   require_numeric(no_na = TRUE) |>
   require_length(1L) |>
   require_between(lower = 0, exclusive_lower = TRUE)
 
-# Enforce anywhere
+# enforce anywhere
 require_positive_scalar(3.14)   # passes silently
 require_positive_scalar(-1)     # Error: x: must be in (0, Inf]
                                 #   Found: -1
-                                #   At: 1
 ```
 
-## Statement of Need
+## One contract, not scattered guard clauses
 
-R has no built-in way to define reusable input contracts. Developers copy-paste the same `stopifnot()` / `if (!is.numeric(...)) stop(...)` blocks across functions. When the contract changes, you hunt for every validation site. Error messages are inconsistent: one function says `"x must be numeric"`, another says `"expected numeric input"`.
-
-`restrictR` replaces that with composable, pipe-friendly validators that:
-
-- are defined once and called like functions,
-- produce structured, grep-friendly error messages,
-- support dependent rules via explicit context,
-- are self-documenting via `print()` and `as_contract_text()`.
-
-## Features
-
-### Schema Validation
+Every exported function tends to start with the same `if (!is.numeric(...)) stop(...)`
+checks, copied across methods and drifting apart, until one function says `"x must be
+numeric"` and another says `"expected numeric input"`. Define the contract once as a
+pipe chain, call it at the top of any method, and the rule lives in one place with one
+error format. Change the rule, change it once.
 
 ```r
+require_feature <- restrict("feature") |>
+  require_numeric(no_na = TRUE, finite = TRUE)
+
 require_newdata <- restrict("newdata") |>
   require_df() |>
   require_has_cols(c("x1", "x2")) |>
-  require_col_numeric("x1", no_na = TRUE, finite = TRUE) |>
-  require_col_numeric("x2", no_na = TRUE, finite = TRUE) |>
+  require_col("x1", require_feature) |>
+  require_col("x2", require_feature) |>
   require_nrow_min(1L)
+
+predict2 <- function(object, newdata, ...) {
+  require_newdata(newdata)
+  predict(object, newdata = newdata)
+}
 ```
 
-### Dependent Rules
+## Rules that depend on other arguments
+
+A one-sided formula references another argument by name. Context is passed
+explicitly when you call the validator, so evaluation never reaches into parent
+frames for it.
 
 ```r
 require_pred <- restrict("pred") |>
   require_numeric(no_na = TRUE) |>
   require_length_matches(~ nrow(newdata))
 
-# Context is explicit, never magic
 require_pred(predictions, newdata = df)
 ```
 
-### Path-Aware Error Messages
+## Path-aware error messages
+
+Failures report the exact path and position, in one shared format:
 
 ```
 newdata$x2: must be numeric, got character
-```
 
-```
 pred: length must match nrow(newdata) (100)
   Found: length 50
-```
 
-```
 x: must not contain NA
   At: 2, 5, 9
 ```
 
-### Self-Documenting
+## A validator that documents itself
+
+The same step list that runs the checks also prints the contract and renders it
+as text for roxygen, so `@param` documentation and enforcement stay in sync:
 
 ```r
 print(require_newdata)
@@ -88,66 +100,13 @@ print(require_newdata)
 #>   4. $x2 must be numeric (no NA, finite)
 #>   5. must have at least 1 row
 
-as_contract_text(require_newdata)
-#> "Must be a data.frame. Must have columns: \"x1\", \"x2\". ..."
-```
-
-## Installation
-
-```r
-# Install development version from GitHub
-# install.packages("pak")
-pak::pak("gcol33/restrictR")
-```
-
-## Usage Examples
-
-### In Functions
-
-```r
-predict2 <- function(object, newdata, ...) {
-  require_newdata(newdata)
-  out <- predict(object, newdata = newdata)
-  require_pred(out, newdata = newdata)
-  out
-}
-```
-
-### Enum Validation
-
-```r
-require_method <- restrict("method") |>
-  require_character(no_na = TRUE) |>
-  require_length(1L) |>
-  require_one_of(c("euclidean", "manhattan", "cosine"))
-
-compute_distance <- function(x, y, method = "euclidean") {
-  require_method(method)
-  # ...
-}
-```
-
-### Column-Level Checks
-
-```r
-require_survey <- restrict("survey") |>
-  require_df() |>
-  require_has_cols(c("age", "income", "status")) |>
-  require_col_numeric("age", no_na = TRUE) |>
-  require_col_between("age", lower = 0, upper = 150) |>
-  require_col_numeric("income", no_na = TRUE, finite = TRUE) |>
-  require_col_one_of("status", c("active", "inactive", "pending"))
-```
-
-### Roxygen Integration
-
-```r
 #' @param newdata `r as_contract_text(require_newdata)`
 ```
 
-### Custom Steps
+## Custom steps
 
-For domain-specific invariants:
+When a contract needs a domain-specific invariant, `require_custom()` runs your
+own check while keeping the same error format through `fail()`:
 
 ```r
 require_weights <- restrict("weights") |>
@@ -157,23 +116,72 @@ require_weights <- restrict("weights") |>
     label = "must sum to 1",
     fn = function(value, name, ctx) {
       if (abs(sum(value) - 1) > 1e-8) {
-        stop(sprintf("%s: must sum to 1, sums to %g", name, sum(value)),
-             call. = FALSE)
+        fail(name, "must sum to 1", found = sprintf("sum = %g", sum(value)))
       }
     }
   )
 ```
 
-## Built-In Steps
+## Built-in steps
 
 | Category | Steps |
 |----------|-------|
-| **Type checks** | `require_df()`, `require_numeric()`, `require_integer()`, `require_character()`, `require_logical()` |
-| **Missingness** | `require_no_na()`, `require_finite()` |
-| **Structure** | `require_length()`, `require_length_min()`, `require_length_max()`, `require_length_matches()`, `require_nrow_min()`, `require_nrow_matches()`, `require_has_cols()` |
-| **Values** | `require_between()`, `require_one_of()` |
-| **Columns** | `require_col_numeric()`, `require_col_character()`, `require_col_between()`, `require_col_one_of()` |
-| **Extension** | `require_custom()` |
+| **Type checks** | `require_df()`, `require_numeric()`, `require_integer()`, `require_character()`, `require_logical()`, `require_class()` |
+| **Null / missingness** | `require_not_null()`, `require_no_na()`, `require_finite()` |
+| **Structure** | `require_scalar()`, `require_named()`, `require_length()`, `require_length_min()`, `require_length_max()`, `require_length_matches()`, `require_nrow_min()`, `require_nrow_matches()`, `require_ncol_min()`, `require_ncol_matches()`, `require_dim()`, `require_has_cols()`, `require_names()`, `require_unique_names()`, `require_sorted()` |
+| **Values** | `require_positive()`, `require_negative()`, `require_between()` (numbers, dates, times, durations, ordered factors), `require_one_of()`, `require_contains()`, `require_set_equal()`, `require_levels()`, `require_disjoint()`, `require_unique()` |
+| **Character** | `require_pattern()`, `require_nchar()`, `require_nonempty()` |
+| **File system** | `require_file_exists()`, `require_dir_exists()`, `require_readable()`, `require_writable()` |
+| **Functions** | `require_function()` |
+| **Composition** | `require_col()`, `require_each()`, `require_fields()`, `require_valid()`, `require_any()`, `allow_null()` |
+| **Extension** | `require_custom()`, `steps()` |
+| **Testing** | `expect_valid()`, `expect_invalid()` |
+
+## Comparison with checkmate
+
+[checkmate](https://CRAN.R-project.org/package=checkmate) is a fast, C-backed
+toolkit for argument checking. It offers `assert*`, `check*`, `test*`, and
+`expect*` families so that, inside a function, you write one call per argument:
+`assertNumeric(x, lower = 0, len = 1)` either passes or raises an error on the
+spot. Checks are expressed as direct function calls and run where they are
+written.
+
+`restrictR` works one level up. Instead of calling checks inline, you build a
+named validator once as a `|>` chain of `require_*()` steps and reuse that object
+across every function that takes the same argument. The two packages differ along
+a few axes:
+
+- **Reuse.** A `restrictR` validator is a callable closure you define once and
+  call at the top of many functions, so the rule for `newdata` lives in one
+  place. checkmate checks are written inline at each call site.
+- **Composition.** Validators compose with the base pipe and branch immutably:
+  `base |> require_length(1L)` and `base |> require_between(lower = 0)` share a
+  base without modifying it. checkmate composes by listing several `assert*`
+  calls in sequence.
+- **Self-documentation.** A validator prints its own contract, and
+  `as_contract_text()` renders it for a roxygen `@param`, so enforcement and
+  documentation stay in sync.
+- **Dependent rules.** Cross-argument constraints use one-sided formulas
+  (`require_length_matches(~ nrow(newdata))`) with context passed explicitly at
+  call time. checkmate expresses such relationships with ordinary R between the
+  checks.
+- **Dependencies.** checkmate uses compiled C code for speed. `restrictR` is
+  pure base R with zero runtime dependencies.
+
+If you want fast, inline per-argument assertions, checkmate is a mature and
+well-tested choice. If you want to name a contract once, reuse it across
+functions, and have it document itself, that is what `restrictR` is built for.
+The two also coexist: a `require_custom()` step can call a checkmate assertion
+inside it.
+
+## Installation
+
+```r
+install.packages("restrictR")            # CRAN
+
+install.packages("pak")                  # development version
+pak::pak("gcol33/restrictR")
+```
 
 ## Documentation
 
@@ -183,9 +191,12 @@ require_weights <- restrict("weights") |>
 
 > "Software is like sex: it's better when it's free." -- Linus Torvalds
 
-I'm a PhD student who builds R packages in my free time because I believe good tools should be free and open. I started these projects for my own work and figured others might find them useful too.
+I'm a PhD student who builds R packages in my free time because I believe good tools
+should be free and open. I started these projects for my own work and figured others
+might find them useful too.
 
-If this package saved you some time, buying me a coffee is a nice way to say thanks. It helps with my coffee addiction.
+If this package saved you some time, buying me a coffee is a nice way to say thanks.
+It helps with my coffee addiction.
 
 [![Buy Me A Coffee](https://img.shields.io/badge/-Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/gcol33)
 

@@ -1,3 +1,40 @@
+test_that("require_scalar() accepts length-1 values", {
+  v <- restrict("x") |> require_scalar()
+  expect_invisible(v(42))
+  expect_invisible(v("hello"))
+  expect_invisible(v(TRUE))
+  expect_invisible(v(NA))
+})
+
+test_that("require_scalar() rejects non-scalar values", {
+  v <- restrict("x") |> require_scalar()
+  expect_error(v(1:5), "must be scalar")
+  expect_error(v(1:5), "Found: length 5")
+  expect_error(v(NULL), "must be scalar")
+  expect_error(v(NULL), "Found: length 0")
+  expect_error(v(character(0)), "must be scalar")
+})
+
+test_that("require_named() accepts named values", {
+  v <- restrict("x") |> require_named()
+  expect_invisible(v(c(a = 1, b = 2)))
+  expect_invisible(v(list(x = 1, y = 2)))
+})
+
+test_that("require_named() rejects unnamed values", {
+  v <- restrict("x") |> require_named()
+  expect_error(v(1:3), "must be named")
+  expect_error(v(list(1, 2)), "must be named")
+})
+
+test_that("require_named() rejects partially-named values", {
+  v <- restrict("x") |> require_named()
+  expect_error(v(c(a = 1, 2)), "must be named \\(all elements\\)")
+  expect_error(v(c(a = 1, 2)), "At: 2")
+  expect_error(v(c(a = 1, b = 2, 3)), "At: 3")
+  expect_error(v(list(x = 1, 2)), "must be named \\(all elements\\)")
+})
+
 test_that("require_length() checks exact length", {
   v <- restrict("x") |> require_length(3L)
   expect_invisible(v(1:3))
@@ -115,4 +152,61 @@ test_that("require_length_matches() rejects two-sided formulas", {
     restrict("x") |> require_length_matches(y ~ nrow(z)),
     "one-sided formula"
   )
+})
+
+test_that("formula steps resolve non-base functions (#7)", {
+  v <- restrict("x") |>
+    require_length_matches(~ as.integer(median(reference)))
+
+  expect_invisible(v(1:3, reference = c(3, 3, 3)))
+  expect_error(
+    v(1:4, reference = c(3, 3, 3)),
+    "length must match"
+  )
+})
+
+test_that("formula data names still come only from explicit context", {
+  v <- restrict("x") |> require_length_matches(~ length(reference))
+  reference <- 1:99  # must be ignored; not passed as context
+  expect_error(v(1:3), "depends on: reference")
+})
+
+test_that("row-count steps reject non-data.frame input through fail()", {
+  nmin <- restrict("df") |> require_nrow_min(2)
+  nmatch <- restrict("df") |> require_nrow_matches(~ nrow(ref))
+  ref <- data.frame(a = 1:2)
+  for (bad in list(1:3, list(1, 2), NULL)) {
+    expect_error(nmin(bad), "df: must be a data.frame or matrix to check row count",
+                 class = "restrictR_failure")
+    expect_error(nmatch(bad, ref = ref),
+                 "df: must be a data.frame or matrix to check row count",
+                 class = "restrictR_failure")
+  }
+  expect_error(nmin(1:3), "got integer")
+})
+
+test_that("length/nrow formulas must evaluate to a single non-NA number", {
+  df <- data.frame(a = 1:2)
+  nrow_v <- restrict("df") |> require_nrow_matches(~ ref)
+  len_v <- restrict("x") |> require_length_matches(~ ref)
+  expect_error(nrow_v(df, ref = c(2, 2)), "must evaluate to a single non-NA number",
+               class = "restrictR_failure")
+  expect_error(nrow_v(df, ref = NA_real_), "single non-NA number")
+  expect_error(len_v(1:2, ref = c(2, 2)), "single non-NA number")
+  expect_error(len_v(1:2, ref = NULL), "single non-NA number")
+  expect_silent(len_v(1:2, ref = 2))
+})
+
+test_that("formula deps are the variables read, not members or built-in names", {
+  expect_equal(formula_vars(quote(nrow(ref$id))), "ref")
+  expect_equal(formula_vars(quote(length(a) + length(b$x$y))), c("a", "b"))
+  expect_equal(formula_vars(quote(x[, 1])), "x")
+  expect_equal(formula_deps(~ length(.value) + length(ref)), "ref")
+
+  v <- restrict("x") |> require_length_matches(~ nrow(ref$tbl))
+  expect_identical(environment(v)$all_deps, "ref")
+  expect_invisible(v(1:2, ref = list(tbl = data.frame(a = 1:2))))
+
+  w <- restrict("x") |> require_length_matches(~ length(.value))
+  expect_invisible(w(1:3))
 })

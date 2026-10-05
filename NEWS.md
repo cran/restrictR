@@ -1,3 +1,88 @@
+# restrictR 0.3.0
+
+* New character steps `require_pattern()`, `require_nchar()` and
+  `require_nonempty()`.
+* New structure steps `require_ncol_min()`, `require_ncol_matches()`,
+  `require_dim()`, `require_names()` (modes `"identical"`, `"subset"`,
+  `"superset"`, `"permutation"`), `require_unique_names()` and
+  `require_sorted()`. `require_has_cols()` is the `"superset"` case of the
+  same comparison. A matrix is checked with `require_class("matrix")`.
+* New set and factor steps `require_contains()`, `require_set_equal()`,
+  `require_levels()` and `require_disjoint()`. `require_one_of()` is the subset
+  test for vectors.
+* New file-system steps `require_file_exists()`, `require_dir_exists()`,
+  `require_readable()` and `require_writable()`.
+* New `require_function()` checks callback arguments by argument names or
+  call signature. `require_custom()` now requires a function callable with
+  three positional arguments.
+* New testthat expectations `expect_valid()` and `expect_invalid()`.
+* New `steps()` returns the label, context dependencies and parameters of every
+  step as a data.frame.
+* `require_nrow_min()` and `require_nrow_matches()` also accept matrices.
+* `require_integer()` rejects `Inf` and `-Inf` in both modes.
+* Formula steps no longer treat the member name in `ref$id` as a context
+  dependency, nor `.value` and `.name`.
+* The failure message of a step is its label, so the two cannot differ:
+  `require_unique()` reports `must contain unique values` and
+  `require_one_of()` reports `must be one of: ...`.
+* New `require_col(col, validator)` lifts any validator onto a data.frame
+  column with path-aware errors (`newdata$age: ...`). It replaces
+  `require_col_numeric()`, `require_col_character()`, `require_col_between()`
+  and `require_col_one_of()`, which are removed: write
+  `require_col("x", restrict("x") |> require_numeric())` instead.
+* New `require_each()` and `require_fields()` validate every element, or
+  named fields, of a list (`layers[[2]]`, `opts$alpha`).
+* New `allow_null()` marks an optional argument: `NULL` passes, otherwise all
+  steps apply.
+* New `require_valid()` includes another validator's steps and
+  `require_any()` accepts a value that satisfies at least one alternative.
+* `require_between()` now accepts `Date`, `POSIXct`, `difftime` and ordered
+  factor values and bounds.
+* `require_nrow_min()` and `require_nrow_matches()` fail with a path-aware
+  error on non-data.frame input, and `require_length_matches()` /
+  `require_nrow_matches()` reject formulas that do not evaluate to a single
+  non-NA number.
+* With `.on_fail = "all"`, a type or structure failure on a path is reported
+  once instead of once per step. The aggregated message lists at most 20
+  failures; the full list stays in `$failures`.
+
+# restrictR 0.2.0
+
+* New step `require_class()`: assert any class (e.g. `factor`, `Date`,
+  `POSIXct`, fitted-model objects) through one verb, with `exact` for a
+  strict first-class match.
+* Validators gain `.on_fail = "all"`: run every step and report all
+  violations in one aggregated error instead of stopping at the first.
+* New non-throwing helpers `is_valid()` (logical predicate) and
+  `validation_errors()` (character vector of failure messages, empty when
+  the value passes).
+* Formula steps (`require_length_matches()`, `require_nrow_matches()`) now
+  resolve non-base functions such as `median()`, `sd()`, and package
+  exports. Data names are still taken only from explicit context.
+* `fail()` now signals a structured `restrictR_failure` condition carrying
+  `path`, `found`, and `at`, so failures can be collected and inspected
+  programmatically.
+
+# restrictR 0.1.2
+
+* New steps: `require_scalar()`, `require_not_null()`, `require_unique()`,
+  `require_named()`.
+* New steps: `require_positive()` and `require_negative()` with `strict`
+  argument (non-strict by default).
+* `require_integer()` gains a `strict` argument. Default (`strict = FALSE`)
+  accepts any numeric whole number; `strict = TRUE` requires the R `integer`
+  type.
+
+# restrictR 0.1.1
+
+* Export `fail()` so custom steps produce canonical structured errors.
+* `as_contract_text()` now capitalizes every sentence, not just the first.
+* `require_between()` and `require_one_of()` omit the `At:` line for scalar
+  values where it adds no information.
+* Vignette: added "Data Frame with Mixed Constraints" section, surfaced
+  immutability in the overview, updated custom step examples to use `fail()`.
+* Documentation: tightened prose in the overview and examples.
+
 # restrictR 0.1.0
 
 * Initial release.

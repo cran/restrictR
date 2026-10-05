@@ -39,21 +39,46 @@ test_that("require_numeric(finite = TRUE) rejects Inf", {
   expect_error(v(c(1, NaN)), "must be finite")
 })
 
-test_that("require_integer() passes for integer", {
+test_that("require_integer() default accepts whole numeric values", {
   v <- restrict("x") |> require_integer()
   expect_invisible(v(1L))
   expect_invisible(v(1:5))
+  expect_invisible(v(5))
+  expect_invisible(v(c(1, 2, 3)))
   expect_invisible(v(NA_integer_))
+  expect_invisible(v(NA_real_))
 })
 
-test_that("require_integer() fails for non-integer", {
+test_that("require_integer() default rejects non-whole values", {
   v <- restrict("x") |> require_integer()
-  expect_error(v(1.5), "must be integer, got numeric")
-  expect_error(v("a"), "must be integer, got character")
+  expect_error(v(1.5), "must be whole number")
+  expect_error(v(1.5), "Found: 1.5")
+  expect_error(v("a"), "must be numeric or integer, got character")
+})
+
+test_that("require_integer() shows At: for vectors with fractional values", {
+  v <- restrict("x") |> require_integer()
+  expect_error(v(c(1, 2.5, 3, 4.1)), "At: 2, 4")
+})
+
+test_that("require_integer(strict = TRUE) requires integer type", {
+  v <- restrict("x") |> require_integer(strict = TRUE)
+  expect_invisible(v(1L))
+  expect_invisible(v(1:5))
+  expect_error(v(1.0), "must be integer type, got numeric")
+  expect_error(v("a"), "must be integer type, got character")
 })
 
 test_that("require_integer(no_na = TRUE) rejects NAs", {
   v <- restrict("x") |> require_integer(no_na = TRUE)
+  expect_invisible(v(c(1, 2, 3)))
+  expect_invisible(v(1:3))
+  expect_error(v(c(1L, NA_integer_, 3L)), "must not contain NA")
+  expect_error(v(c(1, NA, 3)), "must not contain NA")
+})
+
+test_that("require_integer(strict = TRUE, no_na = TRUE) rejects NAs", {
+  v <- restrict("x") |> require_integer(strict = TRUE, no_na = TRUE)
   expect_invisible(v(1:3))
   expect_error(v(c(1L, NA_integer_, 3L)), "must not contain NA")
 })
@@ -92,4 +117,35 @@ test_that("require_logical(no_na = TRUE) rejects NAs", {
   v <- restrict("x") |> require_logical(no_na = TRUE)
   expect_invisible(v(c(TRUE, FALSE)))
   expect_error(v(c(TRUE, NA)), "must not contain NA")
+})
+
+test_that("require_class() passes when the value inherits the class", {
+  expect_invisible((restrict("d") |> require_class("Date"))(Sys.Date()))
+  expect_invisible((restrict("f") |> require_class("factor"))(factor("a")))
+  expect_invisible((restrict("l") |> require_class("list"))(list(1, 2)))
+})
+
+test_that("require_class() fails with a type message for the wrong class", {
+  v <- restrict("d") |> require_class("Date")
+  expect_error(v(1), 'must be of class "Date", got numeric')
+  expect_error(v("2020-01-01"), 'must be of class "Date", got character')
+})
+
+test_that("require_class() honours inheritance unless exact = TRUE", {
+  x <- structure(1, class = c("special", "numeric"))
+  expect_invisible((restrict("x") |> require_class("numeric"))(x))
+  expect_error(
+    (restrict("x") |> require_class("numeric", exact = TRUE))(x),
+    'must be of class "numeric", got special'
+  )
+})
+
+test_that("require_integer() rejects infinite values in both modes", {
+  v <- restrict("x") |> require_integer()
+  expect_error(v(Inf), "must be whole number")
+  expect_error(v(c(1, -Inf, 3)), "Found: -Inf")
+  expect_error(v(c(1, -Inf, 3)), "At: 2")
+  expect_invisible(v(c(1, NaN, NA)))
+  expect_error(restrict("x") |> require_integer(strict = TRUE) |> (\(s) s(Inf))(),
+               "must be integer type, got numeric")
 })

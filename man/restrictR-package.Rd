@@ -4,9 +4,9 @@
 \name{restrictR-package}
 \alias{restrictR}
 \alias{restrictR-package}
-\title{restrictR: Composable Runtime Contracts for R}
+\title{restrictR: Composable Runtime Contracts}
 \description{
-Build reusable validators from small building blocks using the base pipe operator. Define runtime contracts once with 'restrict()' and enforce them anywhere in code. Validators compose naturally, support dependent rules via formulas, and produce clear, path-aware error messages. No DSL, no operator overloading, just idiomatic R.
+Build reusable validators from small building blocks using the base pipe operator. Define runtime contracts once with restrict() and enforce them anywhere in code. Validators compose naturally, support dependent rules via formulas, and produce clear, path-aware error messages. No domain-specific language, no operator overloading, just idiomatic R.
 }
 \seealso{
 Useful links:
@@ -19,6 +19,11 @@ Useful links:
 }
 \author{
 \strong{Maintainer}: Gilles Colling \email{gilles.colling051@gmail.com} (\href{https://orcid.org/0000-0003-3070-6066}{ORCID}) [copyright holder]
+
+Authors:
+\itemize{
+  \item Gilles Colling \email{gilles.colling051@gmail.com} (\href{https://orcid.org/0000-0003-3070-6066}{ORCID}) [copyright holder]
+}
 
 }
 \keyword{internal}

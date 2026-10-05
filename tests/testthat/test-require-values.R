@@ -1,3 +1,35 @@
+test_that("require_not_null() accepts non-NULL values", {
+  v <- restrict("x") |> require_not_null()
+  expect_invisible(v(42))
+  expect_invisible(v(""))
+  expect_invisible(v(NA))
+  expect_invisible(v(integer(0)))
+})
+
+test_that("require_not_null() rejects NULL", {
+  v <- restrict("x") |> require_not_null()
+  expect_error(v(NULL), "must not be NULL")
+})
+
+test_that("require_unique() accepts unique values", {
+  v <- restrict("x") |> require_unique()
+  expect_invisible(v(c(1, 2, 3)))
+  expect_invisible(v(c("a", "b", "c")))
+  expect_invisible(v(1L))
+})
+
+test_that("require_unique() rejects duplicates", {
+  v <- restrict("x") |> require_unique()
+  expect_error(v(c(1, 2, 1, 3, 2)), "must contain unique values")
+  expect_error(v(c(1, 2, 1, 3, 2)), "At: 3, 5")
+  expect_error(v(c("a", "b", "a")), "must contain unique values")
+})
+
+test_that("require_unique() shows Found: with duplicated values", {
+  v <- restrict("x") |> require_unique()
+  expect_error(v(c(1, 2, 1)), "Found:")
+})
+
 test_that("require_between() checks bounds", {
   v <- restrict("x") |> require_between(lower = 0, upper = 1)
   expect_invisible(v(0.5))
@@ -37,6 +69,54 @@ test_that("require_one_of() shows At: for vectors", {
   expect_error(v(c("a", "d", "b", "e")), "At: 2, 4")
 })
 
+test_that("require_positive() default (non-negative) allows zero", {
+  v <- restrict("x") |> require_positive()
+  expect_invisible(v(0))
+  expect_invisible(v(5))
+  expect_invisible(v(c(0, 1, 100)))
+  expect_error(v(-1), "must be non-negative")
+  expect_error(v(-1), "Found: -1")
+})
+
+test_that("require_positive(strict = TRUE) rejects zero", {
+  v <- restrict("x") |> require_positive(strict = TRUE)
+  expect_invisible(v(5))
+  expect_error(v(0), "must be positive")
+  expect_error(v(-1), "must be positive")
+})
+
+test_that("require_positive() shows At: for vectors", {
+  v <- restrict("x") |> require_positive()
+  expect_error(v(c(1, -2, 3, -4)), "At: 2, 4")
+})
+
+test_that("require_positive() omits At: for scalars", {
+  v <- restrict("x") |> require_positive()
+  err <- tryCatch(v(-1), error = conditionMessage)
+  expect_false(grepl("At:", err))
+})
+
+test_that("require_negative() default (non-positive) allows zero", {
+  v <- restrict("x") |> require_negative()
+  expect_invisible(v(0))
+  expect_invisible(v(-5))
+  expect_invisible(v(c(0, -1, -100)))
+  expect_error(v(1), "must be non-positive")
+  expect_error(v(1), "Found: 1")
+})
+
+test_that("require_negative(strict = TRUE) rejects zero", {
+  v <- restrict("x") |> require_negative(strict = TRUE)
+  expect_invisible(v(-5))
+  expect_error(v(0), "must be negative")
+  expect_error(v(1), "must be negative")
+})
+
+test_that("require_negative() shows At: for vectors", {
+  v <- restrict("x") |> require_negative()
+  expect_error(v(c(-1, 2, -3, 4)), "At: 2, 4")
+})
+
 test_that("require_no_na() standalone check", {
   v <- restrict("x") |> require_no_na()
   expect_invisible(v(c(1, 2, 3)))
@@ -60,10 +140,10 @@ test_that("require_finite() standalone check", {
   expect_invisible(v(c(1, NA, 3)))
 })
 
-test_that("require_col_numeric() produces path-aware errors", {
+test_that("require_col() produces path-aware errors", {
   v <- restrict("newdata") |>
     require_df() |>
-    require_col_numeric("x2")
+    require_col("x2", restrict("x2") |> require_numeric())
 
   expect_invisible(v(data.frame(x2 = c(1, 2, 3))))
   expect_error(
@@ -72,10 +152,10 @@ test_that("require_col_numeric() produces path-aware errors", {
   )
 })
 
-test_that("require_col_numeric() checks NA and finite", {
+test_that("require_col() checks NA and finite", {
   v <- restrict("data") |>
     require_df() |>
-    require_col_numeric("val", no_na = TRUE, finite = TRUE)
+    require_col("val", restrict("val") |> require_numeric(no_na = TRUE, finite = TRUE))
 
   expect_invisible(v(data.frame(val = c(1, 2, 3))))
   expect_error(v(data.frame(val = c(1, NA, 3))),
@@ -84,10 +164,10 @@ test_that("require_col_numeric() checks NA and finite", {
                "data\\$val: must be finite")
 })
 
-test_that("require_col_character() produces path-aware errors", {
+test_that("require_col() lifts character checks", {
   v <- restrict("df") |>
     require_df() |>
-    require_col_character("name", no_na = TRUE)
+    require_col("name", restrict("name") |> require_character(no_na = TRUE))
 
   expect_invisible(v(data.frame(name = c("a", "b"))))
   expect_error(
@@ -96,22 +176,22 @@ test_that("require_col_character() produces path-aware errors", {
   )
 })
 
-test_that("require_col_between() checks column value bounds", {
+test_that("require_col() lifts range checks", {
   v <- restrict("df") |>
     require_df() |>
-    require_col_between("count", lower = 0)
+    require_col("count", restrict("count") |> require_between(lower = 0))
 
   expect_invisible(v(data.frame(count = c(0, 5, 10))))
   expect_error(v(data.frame(count = c(5, -3, 10))),
-               "df\\$count: must be >= 0")
-  expect_error(v(data.frame(count = c(5, -3, 10))),
-               "At: 2")
+               "df\\$count: must be in \\[0, Inf\\]")
+  expect_error(v(data.frame(count = c(5, -3, 10))), "At: 2")
 })
 
-test_that("require_col_one_of() checks column set membership", {
+test_that("require_col() lifts set membership", {
   v <- restrict("df") |>
     require_df() |>
-    require_col_one_of("status", c("active", "inactive"))
+    require_col("status", restrict("status") |>
+                  require_one_of(c("active", "inactive")))
 
   expect_invisible(v(data.frame(status = c("active", "inactive"))))
   expect_error(
@@ -128,8 +208,8 @@ test_that("full schema validation works end-to-end", {
   require_newdata <- restrict("newdata") |>
     require_df() |>
     require_has_cols(c("x1", "x2")) |>
-    require_col_numeric("x1", no_na = TRUE, finite = TRUE) |>
-    require_col_numeric("x2", no_na = TRUE, finite = TRUE) |>
+    require_col("x1", restrict("x1") |> require_numeric(no_na = TRUE, finite = TRUE)) |>
+    require_col("x2", restrict("x2") |> require_numeric(no_na = TRUE, finite = TRUE)) |>
     require_nrow_min(1)
 
   good <- data.frame(x1 = c(1, 2, 3), x2 = c(4, 5, 6))
@@ -151,4 +231,59 @@ test_that("dependent validation end-to-end", {
   newdata <- data.frame(x1 = 1:5, x2 = 6:10)
   expect_invisible(require_pred(1:5, newdata = newdata))
   expect_error(require_pred(1:3, newdata = newdata), "Found: length 3")
+})
+
+# ---- Regression: value checks reject non-numeric input (#2) ----
+
+test_that("require_between() rejects non-numeric input with a type error", {
+  v <- restrict("x") |> require_between(lower = 0, upper = 10)
+  expect_error(v("abc"), "must be numeric, got character")
+  expect_error(v(factor("a")), "must be numeric, got factor")
+})
+
+test_that("require_positive() rejects non-numeric input (no silent pass)", {
+  v_strict <- restrict("x") |> require_positive(strict = TRUE)
+  expect_error(v_strict("a"), "must be numeric, got character")
+
+  v <- restrict("x") |> require_positive()
+  expect_error(v(factor("a")), "must be numeric, got factor")
+})
+
+test_that("require_negative() rejects non-numeric input", {
+  v <- restrict("x") |> require_negative()
+  expect_error(v("a"), "must be numeric, got character")
+})
+
+test_that("require_col() with a range validator rejects a non-numeric column", {
+  v <- restrict("df") |> require_df() |>
+    require_col("g", restrict("g") |> require_between(lower = 0))
+  expect_error(v(data.frame(g = c("a", "b"))),
+               "df\\$g: must be numeric, got character")
+})
+
+# ---- Regression: consistent NA handling across value checks (#4) ----
+
+test_that("value checks skip NA (require_no_na owns NA rejection)", {
+  expect_invisible((restrict("x") |> require_between(0, 10))(c(5, NA)))
+  expect_invisible((restrict("x") |> require_positive())(c(1, NA)))
+  expect_invisible((restrict("x") |> require_negative())(c(-1, NA)))
+  expect_invisible((restrict("x") |> require_one_of(c("a", "b")))(c("a", NA)))
+})
+
+test_that("require_col() with set membership skips NA in a column", {
+  v <- restrict("df") |>
+    require_df() |>
+    require_col("status", restrict("status") |>
+                  require_one_of(c("active", "inactive")))
+  expect_invisible(v(data.frame(status = c("active", NA))))
+})
+
+# ---- Regression: column checks guard non-data.frame input (#3) ----
+
+test_that("require_col() gives a path-aware error on non-data.frame input", {
+  v <- restrict("m") |>
+    require_col("x2", restrict("x2") |> require_numeric())
+  expect_error(v(matrix(1:4, 2)),
+               'm: must be a data.frame to check column "x2", got matrix')
+  expect_error(v(1:4), 'm: must be a data.frame to check column "x2"')
 })
